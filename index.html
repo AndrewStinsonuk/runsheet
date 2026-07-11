@@ -379,6 +379,42 @@
       .finally(function () { routeBusy = false; });
   }
 
+  // ---------- toll vs no-toll comparison for the next job ----------
+  var tollJobId = null, tollOrigin = null, tollBusy = false;
+  function fetchRoute(p, j, excludeToll) {
+    var url = 'https://router.project-osrm.org/route/v1/driving/' +
+              p.lon + ',' + p.lat + ';' + j.lon + ',' + j.lat +
+              '?overview=false' + (excludeToll ? '&exclude=toll' : '');
+    return fetch(url)
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res && res.code === 'Ok' && res.routes && res.routes[0]) {
+          return { km: res.routes[0].distance / 1000, mins: Math.round(res.routes[0].duration / 60) };
+        }
+        return null;
+      })
+      .catch(function () { return null; });
+  }
+  function maybeTollUpdate(next) {
+    var p = posNow();
+    if (!p || !next || next.lat == null) return;
+    var moved = !tollOrigin || haversineKm(tollOrigin, p) > 0.25;
+    if (tollBusy) return;
+    if (next.id === tollJobId && !moved) return;
+    tollBusy = true;
+    Promise.all([fetchRoute(p, next, false), fetchRoute(p, next, true)])
+      .then(function (r) {
+        if (r[0]) {
+          next._tollRoute = r[0];
+          next._noTollRoute = r[1];
+          tollJobId = next.id;
+          tollOrigin = { lat: p.lat, lon: p.lon };
+          render();
+        }
+      })
+      .finally(function () { tollBusy = false; });
+  }
+
   // ---------- render ----------
   function render() {
     var queued = jobs.filter(function (j) { return j.status === 'queued'; });
@@ -405,6 +441,20 @@
     var nw = $('nextWrap');
     if (next) {
       var d = fmtDist(next._km);
+      var tollLine = '';
+      if (next._tollRoute) {
+        var t = next._tollRoute, n = next._noTollRoute;
+        if (!n) {
+          tollLine = '<div class="sub" style="margin-top:-8px">No toll-free route found</div>';
+        } else if (Math.abs(t.mins - n.mins) < 1 && Math.abs(t.km - n.km) < 0.3) {
+          tollLine = '<div class="sub" style="margin-top:-8px">No toll roads on this route</div>';
+        } else {
+          tollLine = '<div class="sub" style="margin-top:-8px"><span style="color:var(--amber)">Tolls:</span> ' +
+                     t.km.toFixed(1) + ' km \u00b7 ' + t.mins + ' min &nbsp;&nbsp;' +
+                     '<span style="color:var(--amber)">No tolls:</span> ' +
+                     n.km.toFixed(1) + ' km \u00b7 ' + n.mins + ' min</div>';
+        }
+      }
       nw.innerHTML =
         '<div class="next-card">' +
           '<div class="eyebrow" style="display:flex;justify-content:space-between;align-items:center">' +
@@ -415,6 +465,7 @@
           (next.display ? '<div class="sub">' + esc(next.display) + '</div>' : '') +
           '<div class="dist">' + d.n + '<small>' + d.u +
             (next._mins != null ? ' \u00b7 ' + next._mins + ' min' : (posNow() ? ' away' : '')) + '</small></div>' +
+          tollLine +
           '<div class="btn-row">' +
             '<a class="btn btn-nav" href="' + navUrl(next) + '" target="_blank" rel="noopener">Navigate</a>' +
             '<button class="btn btn-done" onclick="markDone(\'' + next.id + '\')">Delivered</button>' +
@@ -459,6 +510,7 @@
 
     // refresh road distances if we've moved or the job list changed
     setTimeout(maybeRouteUpdate, 0);
+    setTimeout(function () { maybeTollUpdate(next); }, 0);
   }
 
   // ---------- voice input (mic button, where the browser supports it) ----------
