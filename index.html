@@ -102,6 +102,7 @@
 <div id="doneList"></div>
 
 <div class="footer-actions">
+  <button id="navPrefBtn" onclick="cycleNavApp()">Nav: Google Maps</button>
   <button onclick="setStartPoint()">Set start point</button>
   <button id="clearDoneBtn">Clear delivered</button>
   <button id="clearAllBtn">Clear all</button>
@@ -305,12 +306,22 @@
     if (confirm('Clear all jobs?')) { jobs = []; save(); render(); }
   });
 
-  function navUrl(j) {
-    return 'https://www.google.com/maps/dir/?api=1&destination=' + j.lat + ',' + j.lon;
-  }
-  function appleUrl(j) {
-    return 'https://maps.apple.com/?daddr=' + j.lat + ',' + j.lon;
-  }
+  var navApps = {
+    google: { name: 'Google Maps', url: function (j) { return 'https://www.google.com/maps/dir/?api=1&destination=' + j.lat + ',' + j.lon; } },
+    waze:   { name: 'Waze',        url: function (j) { return 'https://waze.com/ul?ll=' + j.lat + ',' + j.lon + '&navigate=yes'; } },
+    apple:  { name: 'Apple Maps',  url: function (j) { return 'https://maps.apple.com/?daddr=' + j.lat + ',' + j.lon; } }
+  };
+  var navPref = store.get('runsheet_nav') || 'google';
+  if (!navApps[navPref]) navPref = 'google';
+  function navUrl(j) { return navApps[navPref].url(j); }
+  window.cycleNavApp = function () {
+    var order = ['google', 'waze', 'apple'];
+    navPref = order[(order.indexOf(navPref) + 1) % order.length];
+    store.set('runsheet_nav', navPref);
+    var b = document.getElementById('navPrefBtn');
+    if (b) b.textContent = 'Nav: ' + navApps[navPref].name;
+    render();
+  };
   function esc(s) {
     return String(s).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -348,8 +359,7 @@
           (next.display ? '<div class="sub">' + esc(next.display) + '</div>' : '') +
           '<div class="dist">' + d.n + '<small>' + d.u + (posNow() ? ' away' : '') + '</small></div>' +
           '<div class="btn-row">' +
-            '<a class="btn btn-nav" href="' + navUrl(next) + '" target="_blank" rel="noopener">Google&nbsp;Maps</a>' +
-            '<a class="btn btn-nav" href="' + appleUrl(next) + '" target="_blank" rel="noopener">Apple&nbsp;Maps</a>' +
+            '<a class="btn btn-nav" href="' + navUrl(next) + '" target="_blank" rel="noopener">Navigate</a>' +
             '<button class="btn btn-done" onclick="markDone(\'' + next.id + '\')">Delivered</button>' +
           '</div>' +
         '</div>';
@@ -392,6 +402,8 @@
   }
 
   render();
+  var npb = document.getElementById('navPrefBtn');
+  if (npb) npb.textContent = 'Nav: ' + navApps[navPref].name;
   // re-geocode anything that was saved mid-lookup
   jobs.forEach(function (j) { if (j.lat == null && !j.error && j.status === 'queued') geocode(j); });
 })();
