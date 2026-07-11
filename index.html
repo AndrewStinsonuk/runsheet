@@ -243,19 +243,23 @@
 
   // ---------- GPS ----------
   var gpsDot = $('gpsDot'), gpsText = $('gpsText');
+  var gpsWatchId = null;
   function startGPS() {
-    if (!navigator.geolocation) { gpsDot.className = 'gps-dot err'; gpsText.textContent = 'No GPS'; return; }
-    navigator.geolocation.watchPosition(function (pos) {
+    if (!navigator.geolocation) { gpsDot.className = 'gps-dot err'; gpsText.textContent = 'No GPS support'; return; }
+    if (gpsWatchId != null) navigator.geolocation.clearWatch(gpsWatchId);
+    gpsText.textContent = 'GPS: locating\u2026';
+    gpsWatchId = navigator.geolocation.watchPosition(function (pos) {
       here = { lat: pos.coords.latitude, lon: pos.coords.longitude };
       gpsDot.className = 'gps-dot on';
       gpsText.textContent = 'GPS live';
       render();
     }, function (err) {
       gpsDot.className = 'gps-dot err';
-      gpsText.textContent = manualStart ? 'From: ' + manualStart.label
-                          : (err.code === 1 ? 'GPS denied' : 'GPS error');
+      var reason = err.code === 1 ? 'GPS denied' : (err.code === 2 ? 'GPS unavailable' : 'GPS timeout');
+      gpsText.textContent = reason + (manualStart ? ' \u00b7 from ' + manualStart.label : '') + ' \u2014 tap to retry';
     }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
   }
+  document.querySelector('.gps').addEventListener('click', startGPS);
   startGPS();
 
   // ---------- manual start point (fallback when no GPS) ----------
