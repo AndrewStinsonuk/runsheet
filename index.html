@@ -165,3 +165,304 @@
         if (res && res.length) {
           return { lat: parseFloat(res[0].lat), lon: parseFloat(res[0].lon), display: res[0].display_name };
         }
+        return null;
+      });
+  }
+  function tryPhoton(q) {
+    // Fuzzy place/business search on OSM data; biased toward current GPS position
+    // so e.g. "Bunnings" resolves to the nearest Bunnings.
+    var url = 'https://photon.komoot.io/api/?limit=5&q=' + encodeURIComponent(q);
+    var p = posNow();
+    if (p) url += '&lat=' + p.lat + '&lon=' + p.lon;
+    return fetch(url, { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        var feats = (res && res.features) ? res.features.filter(function (f) {
+          return f.properties && f.properties.countrycode === 'AU';
+        }) : [];
+        if (!feats.length) return null;
+        var f = feats[0], p = f.properties;
+        var parts = [p.name, p.street && (p.housenumber ? p.housenumber + ' ' + p.street : p.street),
+                     p.district, p.city, p.state, p.postcode].filter(Boolean);
+        return { lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0],
+                 display: parts.join(', ') };
+      });
+  }
+  function pumpGeo() {
+    if (geoBusy || geoQueue.length === 0) return;
+    geoBusy = true;
+    var job = geoQueue.shift();
+    tryNominatim(job.label)
+      .then(function (hit) {
+        if (hit) return hit;
+        return new Promise(function (resolve) {
+          setTimeout(function () { resolve(tryPhoton(job.label)); }, 400);
+        });
+      })
+      .then(function (hit) {
+        if (hit) {
+          job.lat = hit.lat; job.lon = hit.lon; job.display = hit.display;
+          setStatus('');
+        } else {
+          job.error = true;
+          setStatus('Couldn\u2019t find "' + job.label + '" \u2014 try adding a suburb, or use the street address.', true);
+        }
+        save(); render();
+      })
+      .catch(function () {
+        job.error = true;
+        setStatus('Network problem looking up "' + job.label + '". Tap Retry.', true);
+        save(); render();
+      })
+      .finally(function () {
+        setTimeout(function () { geoBusy = false; pumpGeo(); }, 1100);
+      });
+  }
+
+  // ---------- add ----------
+  function addAddresses(text) {
+    var lines = text.split(/\n+/).map(function (s) { return s.trim(); }).filter(Boolean);
+    if (!lines.length) return;
+    lines.forEach(function (line) {
+      var job = { id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+                  label: line, lat: null, lon: null, display: null, status: 'queued', error: false };
+      jobs.push(job);
+      geocode(job);
+    });
+    save(); render();
+    input.value = '';
+    setStatus(lines.length > 1 ? 'Looking up ' + lines.length + ' addresses\u2026' : 'Looking up address\u2026');
+  }
+  addBtn.addEventListener('click', function () { addAddresses(input.value); });
+  input.addEventListener('keydown', function (e) { if (e.key === 'Enter') addAddresses(input.value); });
+  input.addEventListener('paste', function (e) {
+    var t = (e.clipboardData || window.clipboardData).getData('text');
+    if (t && t.indexOf('\n') !== -1) { e.preventDefault(); addAddresses(t); }
+  });
+
+  // ---------- GPS ----------
+  var gpsDot = $('gpsDot'), gpsText = $('gpsText');
+  function startGPS() {
+    if (!navigator.geolocation) { gpsDot.className = 'gps-dot err'; gpsText.textContent = 'No GPS'; return; }
+    navigator.geolocation.watchPosition(function (pos) {
+      here = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      gpsDot.className = 'gps-dot on';
+      gpsText.textContent = 'GPS live';
+      render();
+    }, function (err) {
+      gpsDot.className = 'gps-dot err';
+      gpsText.textContent = manualStart ? 'From: ' + manualStart.label
+                          : (err.code === 1 ? 'GPS denied' : 'GPS error');
+    }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+  }
+  startGPS();
+
+  // ---------- manual start point (fallback when no GPS) ----------
+  window.setStartPoint = function () {
+    var q = prompt('Starting point (address or suburb):', manualStart ? manualStart.label : '');
+    if (!q) return;
+    q = q.trim();
+    if (!q) return;
+    setStatus('Looking up start point\u2026');
+    tryNominatim(q)
+      .then(function (hit) { return hit || tryPhoton(q); })
+      .then(function (hit) {
+        if (hit) {
+          manualStart = { lat: hit.lat, lon: hit.lon, label: q };
+          store.set('runsheet_start', JSON.stringify(manualStart));
+          if (!here) { gpsDot.className = 'gps-dot'; gpsText.textContent = 'From: ' + q; }
+          setStatus('');
+          render();
+        } else {
+          setStatus('Couldn\u2019t find start point "' + q + '".', true);
+        }
+      })
+      .catch(function () { setStatus('Network problem looking up start point.', true); });
+  };
+  if (manualStart && !here) { gpsText.textContent = 'From: ' + manualStart.label; }
+
+  // ---------- actions ----------
+  window.pinJob = function (id) {
+    jobs.forEach(function (x) { x.pinned = (x.id === id); });
+    save(); render();
+  };
+  window.unpinJob = function () {
+    jobs.forEach(function (x) { x.pinned = false; });
+    save(); render();
+  };
+  window.markDone = function (id) {
+    var j = jobs.find(function (x) { return x.id === id; });
+    if (j) { j.status = 'done'; j.pinned = false; save(); render(); }
+  };
+  window.undoDone = function (id) {
+    var j = jobs.find(function (x) { return x.id === id; });
+    if (j) { j.status = 'queued'; save(); render(); }
+  };
+  window.removeJob = function (id) {
+    jobs = jobs.filter(function (x) { return x.id !== id; });
+    save(); render();
+  };
+  window.retryJob = function (id) {
+    var j = jobs.find(function (x) { return x.id === id; });
+    if (j) { j.error = false; geocode(j); render(); }
+  };
+  $('clearDoneBtn').addEventListener('click', function () {
+    jobs = jobs.filter(function (x) { return x.status !== 'done'; });
+    save(); render();
+  });
+  $('clearAllBtn').addEventListener('click', function () {
+    if (confirm('Clear all jobs?')) { jobs = []; save(); render(); }
+  });
+
+  var navApps = {
+    google: { name: 'Google Maps', url: function (j) { return 'https://www.google.com/maps/dir/?api=1&destination=' + j.lat + ',' + j.lon; } },
+    waze:   { name: 'Waze',        url: function (j) { return 'https://waze.com/ul?ll=' + j.lat + ',' + j.lon + '&navigate=yes'; } },
+    apple:  { name: 'Apple Maps',  url: function (j) { return 'https://maps.apple.com/?daddr=' + j.lat + ',' + j.lon; } }
+  };
+  var navPref = store.get('runsheet_nav') || 'google';
+  if (!navApps[navPref]) navPref = 'google';
+  function navUrl(j) { return navApps[navPref].url(j); }
+  window.cycleNavApp = function () {
+    var order = ['google', 'waze', 'apple'];
+    navPref = order[(order.indexOf(navPref) + 1) % order.length];
+    store.set('runsheet_nav', navPref);
+    var b = document.getElementById('navPrefBtn');
+    if (b) b.textContent = 'Nav: ' + navApps[navPref].name;
+    render();
+  };
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  // ---------- road distances via OSRM (falls back to straight-line) ----------
+  var routeOrigin = null, routeSig = '', routeBusy = false, routeLast = 0;
+  function maybeRouteUpdate() {
+    var p = posNow();
+    if (!p) return;
+    var targets = jobs.filter(function (j) { return j.status === 'queued' && j.lat != null && !j.error; });
+    if (!targets.length) return;
+    var sig = targets.map(function (j) { return j.id; }).sort().join(',');
+    var moved = !routeOrigin || haversineKm(routeOrigin, p) > 0.25;
+    if (routeBusy) return;
+    if (sig === routeSig && !moved) return;
+    if (sig === routeSig && Date.now() - routeLast < 15000) return;
+    routeBusy = true;
+    var coords = [p.lon + ',' + p.lat].concat(
+      targets.map(function (j) { return j.lon + ',' + j.lat; })).join(';');
+    var url = 'https://router.project-osrm.org/table/v1/driving/' + coords +
+              '?sources=0&annotations=distance,duration';
+    fetch(url)
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res && res.code === 'Ok' && res.distances && res.distances[0]) {
+          targets.forEach(function (j, i) {
+            var m = res.distances[0][i + 1];
+            var s = res.durations && res.durations[0] ? res.durations[0][i + 1] : null;
+            if (m != null) {
+              j._roadKm = m / 1000;
+              j._mins = s != null ? Math.round(s / 60) : null;
+            }
+          });
+          routeOrigin = { lat: p.lat, lon: p.lon };
+          routeSig = sig;
+          routeLast = Date.now();
+          render();
+        }
+      })
+      .catch(function () { /* straight-line fallback stays in place */ })
+      .finally(function () { routeBusy = false; });
+  }
+
+  // ---------- render ----------
+  function render() {
+    var queued = jobs.filter(function (j) { return j.status === 'queued'; });
+    var done = jobs.filter(function (j) { return j.status === 'done'; });
+
+    // compute distances: road distance when we have it, straight-line otherwise
+    var p = posNow();
+    queued.forEach(function (j) {
+      var straight = (p && j.lat != null) ? haversineKm(p, j) : null;
+      j._km = (j._roadKm != null) ? j._roadKm : straight;
+    });
+    // located jobs sorted by distance first, then pending lookups, then errors
+    queued.sort(function (a, b) {
+      if (a.error !== b.error) return a.error ? 1 : -1;
+      if ((a._km == null) !== (b._km == null)) return a._km == null ? 1 : -1;
+      return (a._km || 0) - (b._km || 0);
+    });
+
+    var pinned = queued.find(function (j) { return j.pinned && !j.error && j.lat != null; });
+    var next = pinned || (queued.length && !queued[0].error && queued[0].lat != null ? queued[0] : null);
+    var rest = next ? queued.filter(function (j) { return j.id !== next.id; }) : queued;
+
+    // next card
+    var nw = $('nextWrap');
+    if (next) {
+      var d = fmtDist(next._km);
+      nw.innerHTML =
+        '<div class="next-card">' +
+          '<div class="eyebrow" style="display:flex;justify-content:space-between;align-items:center">' +
+            '<span>Next job' + (pinned ? ' \u00b7 your pick' : '') + '</span>' +
+            (pinned ? '<button onclick="unpinJob()" style="background:none;border:1px solid var(--line);border-radius:6px;color:var(--muted);font-size:11px;padding:4px 8px;cursor:pointer;letter-spacing:normal;text-transform:none;font-family:var(--body)">Back to nearest</button>' : '') +
+          '</div>' +
+          '<div class="addr">' + esc(next.label) + '</div>' +
+          (next.display ? '<div class="sub">' + esc(next.display) + '</div>' : '') +
+          '<div class="dist">' + d.n + '<small>' + d.u +
+            (next._mins != null ? ' \u00b7 ' + next._mins + ' min' : (posNow() ? ' away' : '')) + '</small></div>' +
+          '<div class="btn-row">' +
+            '<a class="btn btn-nav" href="' + navUrl(next) + '" target="_blank" rel="noopener">Navigate</a>' +
+            '<button class="btn btn-done" onclick="markDone(\'' + next.id + '\')">Delivered</button>' +
+          '</div>' +
+        '</div>';
+    } else {
+      nw.innerHTML = '';
+    }
+
+    // queue list
+    var ql = $('queueList');
+    ql.innerHTML = rest.map(function (j) {
+      var d = fmtDist(j._km);
+      var cls = 'job' + (j.lat == null && !j.error ? ' pending-geo' : '');
+      var sub = j.error ? 'Address not found' : (j.lat == null ? 'Looking up\u2026' : (j.display || ''));
+      var actions = j.error
+        ? '<button class="mini" onclick="retryJob(\'' + j.id + '\')">Retry</button>' +
+          '<button class="mini" onclick="removeJob(\'' + j.id + '\')">Remove</button>'
+        : '<button class="mini" style="color:var(--amber);border-color:var(--amber-dim)" onclick="pinJob(\'' + j.id + '\')">Next</button>' +
+          '<button class="mini" onclick="removeJob(\'' + j.id + '\')">\u2715</button>';
+      return '<div class="' + cls + '">' +
+        '<div class="info"><div class="addr">' + esc(j.label) + '</div>' +
+        '<div class="sub">' + esc(sub) + '</div></div>' +
+        '<div class="dist">' + d.n + '<small>' + d.u + '</small></div>' +
+        actions + '</div>';
+    }).join('');
+
+    $('queueLabel').style.display = rest.length ? 'flex' : 'none';
+    $('queueCount').textContent = rest.length + ' more';
+    $('emptyState').style.display = jobs.length ? 'none' : 'block';
+
+    // done list
+    var dl = $('doneList');
+    dl.innerHTML = done.map(function (j) {
+      return '<div class="job done">' +
+        '<div class="info"><div class="addr">' + esc(j.label) + '</div></div>' +
+        '<button class="mini" onclick="undoDone(\'' + j.id + '\')">Undo</button>' +
+        '<button class="mini" onclick="removeJob(\'' + j.id + '\')">\u2715</button></div>';
+    }).join('');
+    $('doneLabel').style.display = done.length ? 'flex' : 'none';
+    $('doneCount').textContent = done.length;
+
+    // refresh road distances if we've moved or the job list changed
+    setTimeout(maybeRouteUpdate, 0);
+  }
+
+  render();
+  var npb = document.getElementById('navPrefBtn');
+  if (npb) npb.textContent = 'Nav: ' + navApps[navPref].name;
+  // re-geocode anything that was saved mid-lookup
+  jobs.forEach(function (j) { if (j.lat == null && !j.error && j.status === 'queued') geocode(j); });
+})();
+</script>
+</body>
+</html>
