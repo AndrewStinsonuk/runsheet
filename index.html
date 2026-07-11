@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#14181D">
+<title>Run Sheet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #14181D;
+    --surface: #1E242B;
+    --surface-2: #262E37;
+    --line: #333D48;
+    --amber: #FFB020;
+    --amber-dim: #8a6212;
+    --green: #37C871;
+    --red: #F26D6D;
+    --text: #F2F4F6;
+    --muted: #8B95A1;
+    --display: 'Barlow Condensed', system-ui, sans-serif;
+    --body: -apple-system, system-ui, 'Segoe UI', Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { background: var(--bg); color: var(--text); font-family: var(--body); }
+  body { padding: max(env(safe-area-inset-top), 12px) 14px calc(env(safe-area-inset-bottom) + 24px); max-width: 560px; margin: 0 auto; }
+
+  header { display: flex; align-items: baseline; justify-content: space-between; padding: 6px 2px 14px; }
+  header h1 { font-family: var(--display); font-weight: 700; font-size: 30px; letter-spacing: 0.04em; text-transform: uppercase; }
+  header h1 span { color: var(--amber); }
+  .gps { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
+  .gps-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .gps-dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 2.5s infinite; }
+  .gps-dot.err { background: var(--red); }
+  @keyframes pulse { 50% { opacity: 0.5; } }
+  @media (prefers-reduced-motion: reduce) { .gps-dot.on { animation: none; } }
+
+  .add-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .add-row input { flex: 1; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 14px; color: var(--text); font-size: 16px; outline: none; }
+  .add-row input:focus { border-color: var(--amber); }
+  .add-row button { background: var(--amber); color: #1a1408; border: none; border-radius: 10px; padding: 0 20px; font-family: var(--display); font-weight: 700; font-size: 18px; letter-spacing: 0.05em; text-transform: uppercase; cursor: pointer; }
+  .add-row button:disabled { background: var(--amber-dim); color: #3a3325; }
+  .hint { font-size: 12px; color: var(--muted); margin: 0 2px 16px; }
+  .status-msg { font-size: 13px; margin: 0 2px 12px; color: var(--amber); min-height: 16px; }
+  .status-msg.error { color: var(--red); }
+
+  .section-label { font-family: var(--display); font-weight: 600; font-size: 15px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin: 18px 2px 8px; display: flex; justify-content: space-between; align-items: baseline; }
+  .section-label .count { color: var(--amber); }
+
+  /* NEXT JOB headboard card */
+  .next-card { background: var(--surface); border: 2px solid var(--amber); border-radius: 14px; padding: 16px 16px 14px; margin-bottom: 6px; }
+  .next-card .eyebrow { font-family: var(--display); font-weight: 700; font-size: 14px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--amber); margin-bottom: 6px; }
+  .next-card .addr { font-size: 19px; font-weight: 600; line-height: 1.3; margin-bottom: 4px; overflow-wrap: anywhere; }
+  .next-card .sub { font-size: 13px; color: var(--muted); margin-bottom: 12px; overflow-wrap: anywhere; }
+  .next-card .dist { font-family: var(--display); font-weight: 700; font-size: 44px; line-height: 1; color: var(--amber); font-variant-numeric: tabular-nums; margin-bottom: 14px; }
+  .next-card .dist small { font-size: 20px; font-weight: 600; color: var(--muted); margin-left: 4px; }
+  .btn-row { display: flex; gap: 8px; }
+  .btn { flex: 1; border: none; border-radius: 10px; padding: 14px 6px; font-family: var(--display); font-weight: 700; font-size: 17px; letter-spacing: 0.05em; text-transform: uppercase; cursor: pointer; text-align: center; text-decoration: none; }
+  .btn-nav { background: var(--surface-2); color: var(--text); border: 1px solid var(--line); }
+  .btn-done { background: var(--green); color: #06240f; }
+
+  .job { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 12px; }
+  .job .info { flex: 1; min-width: 0; }
+  .job .addr { font-size: 15px; font-weight: 500; line-height: 1.3; overflow-wrap: anywhere; }
+  .job .sub { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+  .job .dist { font-family: var(--display); font-weight: 700; font-size: 22px; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .job .dist small { font-size: 13px; color: var(--muted); }
+  .job .mini { background: none; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font-size: 12px; padding: 8px 10px; cursor: pointer; white-space: nowrap; }
+  .job.done { opacity: 0.55; }
+  .job.done .addr { text-decoration: line-through; }
+  .job.pending-geo { border-style: dashed; }
+
+  .empty { text-align: center; color: var(--muted); font-size: 14px; padding: 34px 20px; border: 1px dashed var(--line); border-radius: 12px; }
+  .footer-actions { margin-top: 20px; display: flex; gap: 8px; }
+  .footer-actions button { flex: 1; background: none; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); font-size: 13px; padding: 12px; cursor: pointer; }
+  .note { font-size: 11px; color: var(--muted); text-align: center; margin-top: 18px; line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Run<span>Sheet</span></h1>
+  <div class="gps"><div class="gps-dot" id="gpsDot"></div><span id="gpsText">GPS off</span></div>
+</header>
+
+<div class="add-row">
+  <input id="addrInput" type="text" placeholder="Add delivery address" autocomplete="street-address" enterkeyhint="done">
+  <button id="addBtn">Add</button>
+</div>
+<p class="hint">Tip: paste several addresses at once, one per line.</p>
+<p class="status-msg" id="statusMsg"></p>
+
+<div id="nextWrap"></div>
+<div class="section-label" id="queueLabel" style="display:none">Then <span class="count" id="queueCount"></span></div>
+<div id="queueList"></div>
+<div id="emptyState" class="empty">No jobs yet. Add your first address above.</div>
+
+<div class="section-label" id="doneLabel" style="display:none">Delivered <span class="count" id="doneCount"></span></div>
+<div id="doneList"></div>
+
+<div class="footer-actions">
+  <button onclick="setStartPoint()">Set start point</button>
+  <button id="clearDoneBtn">Clear delivered</button>
+  <button id="clearAllBtn">Clear all</button>
+</div>
+
+<p class="note">Distances are direct (straight-line), recalculated live from your GPS position.<br>Geocoding by OpenStreetMap Nominatim &amp; Photon.</p>
+
+<script>
+(function () {
+  // ---------- safe storage (falls back to memory if unavailable) ----------
+  var mem = {};
+  var store = {
+    get: function (k) { try { return localStorage.getItem(k); } catch (e) { return mem[k] || null; } },
+    set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) { mem[k] = v; } }
+  };
+
+  var jobs = [];
+  try { jobs = JSON.parse(store.get('runsheet_jobs') || '[]'); } catch (e) { jobs = []; }
+  var here = null; // live GPS {lat, lon}
+  var manualStart = null; // typed fallback {lat, lon, label}
+  try { manualStart = JSON.parse(store.get('runsheet_start') || 'null'); } catch (e) { manualStart = null; }
+  function posNow() { return here || manualStart; }
+
+  var $ = function (id) { return document.getElementById(id); };
+  var input = $('addrInput'), addBtn = $('addBtn'), statusMsg = $('statusMsg');
+
+  function save() { store.set('runsheet_jobs', JSON.stringify(jobs)); }
+  function setStatus(msg, isErr) {
+    statusMsg.textContent = msg || '';
+    statusMsg.className = 'status-msg' + (isErr ? ' error' : '');
+  }
+
+  // ---------- distance ----------
+  function haversineKm(a, b) {
+    var R = 6371, toRad = Math.PI / 180;
+    var dLat = (b.lat - a.lat) * toRad, dLon = (b.lon - a.lon) * toRad;
+    var s = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(a.lat * toRad) * Math.cos(b.lat * toRad) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return 2 * R * Math.asin(Math.sqrt(s));
+  }
+  function fmtDist(km) {
+    if (km == null) return { n: '—', u: '' };
+    if (km < 1) return { n: Math.round(km * 1000), u: 'm' };
+    return { n: km < 10 ? km.toFixed(1) : Math.round(km), u: 'km' };
+  }
+
+  // ---------- geocoding: Nominatim (addresses) then Photon (business names), 1/sec ----------
+  var geoQueue = [], geoBusy = false;
+  function geocode(job) {
+    geoQueue.push(job);
+    pumpGeo();
+  }
+  function tryNominatim(q) {
+    var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=au&q=' +
+              encodeURIComponent(q);
+    return fetch(url, { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res && res.length) {
+          return { lat: parseFloat(res[0].lat), lon: parseFloat(res[0].lon), display: res[0].display_name };
+        }
+        return null;
+      });
+  }
+  function tryPhoton(q) {
+    // Fuzzy place/business search on OSM data; biased toward current GPS position
+    // so e.g. "Bunnings" resolves to the nearest Bunnings.
+    var url = 'https://photon.komoot.io/api/?limit=5&q=' + encodeURIComponent(q);
+    var p = posNow();
+    if (p) url += '&lat=' + p.lat + '&lon=' + p.lon;
+    return fetch(url, { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        var feats = (res && res.features) ? res.features.filter(function (f) {
+          return f.properties && f.properties.countrycode === 'AU';
+        }) : [];
+        if (!feats.length) return null;
+        var f = feats[0], p = f.properties;
+        var parts = [p.name, p.street && (p.housenumber ? p.housenumber + ' ' + p.street : p.street),
+                     p.district, p.city, p.state, p.postcode].filter(Boolean);
+        return { lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0],
+                 display: parts.join(', ') };
+      });
+  }
+  function pumpGeo() {
+    if (geoBusy || geoQueue.length === 0) return;
+    geoBusy = true;
+    var job = geoQueue.shift();
+    tryNominatim(job.label)
+      .then(function (hit) {
+        if (hit) return hit;
+        return new Promise(function (resolve) {
+          setTimeout(function () { resolve(tryPhoton(job.label)); }, 400);
+        });
+      })
+      .then(function (hit) {
+        if (hit) {
+          job.lat = hit.lat; job.lon = hit.lon; job.display = hit.display;
+          setStatus('');
+        } else {
+          job.error = true;
+          setStatus('Couldn\u2019t find "' + job.label + '" \u2014 try adding a suburb, or use the street address.', true);
+        }
+        save(); render();
+      })
+      .catch(function () {
+        job.error = true;
+        setStatus('Network problem looking up "' + job.label + '". Tap Retry.', true);
+        save(); render();
+      })
+      .finally(function () {
+        setTimeout(function () { geoBusy = false; pumpGeo(); }, 1100);
+      });
+  }
+
+  // ---------- add ----------
+  function addAddresses(text) {
+    var lines = text.split(/\n+/).map(function (s) { return s.trim(); }).filter(Boolean);
+    if (!lines.length) return;
+    lines.forEach(function (line) {
+      var job = { id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+                  label: line, lat: null, lon: null, display: null, status: 'queued', error: false };
+      jobs.push(job);
+      geocode(job);
+    });
+    save(); render();
+    input.value = '';
+    setStatus(lines.length > 1 ? 'Looking up ' + lines.length + ' addresses\u2026' : 'Looking up address\u2026');
+  }
+  addBtn.addEventListener('click', function () { addAddresses(input.value); });
+  input.addEventListener('keydown', function (e) { if (e.key === 'Enter') addAddresses(input.value); });
+  input.addEventListener('paste', function (e) {
+    var t = (e.clipboardData || window.clipboardData).getData('text');
+    if (t && t.indexOf('\n') !== -1) { e.preventDefault(); addAddresses(t); }
+  });
+
+  // ---------- GPS ----------
+  var gpsDot = $('gpsDot'), gpsText = $('gpsText');
+  function startGPS() {
+    if (!navigator.geolocation) { gpsDot.className = 'gps-dot err'; gpsText.textContent = 'No GPS'; return; }
+    navigator.geolocation.watchPosition(function (pos) {
+      here = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      gpsDot.className = 'gps-dot on';
+      gpsText.textContent = 'GPS live';
+      render();
+    }, function (err) {
+      gpsDot.className = 'gps-dot err';
+      gpsText.textContent = manualStart ? 'From: ' + manualStart.label
+                          : (err.code === 1 ? 'GPS denied' : 'GPS error');
+    }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+  }
+  startGPS();
+
+  // ---------- manual start point (fallback when no GPS) ----------
+  window.setStartPoint = function () {
+    var q = prompt('Starting point (address or suburb):', manualStart ? manualStart.label : '');
+    if (!q) return;
+    q = q.trim();
+    if (!q) return;
+    setStatus('Looking up start point\u2026');
+    tryNominatim(q)
+      .then(function (hit) { return hit || tryPhoton(q); })
+      .then(function (hit) {
+        if (hit) {
+          manualStart = { lat: hit.lat, lon: hit.lon, label: q };
+          store.set('runsheet_start', JSON.stringify(manualStart));
+          if (!here) { gpsDot.className = 'gps-dot'; gpsText.textContent = 'From: ' + q; }
+          setStatus('');
+          render();
+        } else {
+          setStatus('Couldn\u2019t find start point "' + q + '".', true);
+        }
+      })
+      .catch(function () { setStatus('Network problem looking up start point.', true); });
+  };
+  if (manualStart && !here) { gpsText.textContent = 'From: ' + manualStart.label; }
+
+  // ---------- actions ----------
+  window.markDone = function (id) {
+    var j = jobs.find(function (x) { return x.id === id; });
+    if (j) { j.status = 'done'; save(); render(); }
+  };
+  window.undoDone = function (id) {
+    var j = jobs.find(function (x) { return x.id === id; });
+    if (j) { j.status = 'queued'; save(); render(); }
+  };
+  window.removeJob = function (id) {
+    jobs = jobs.filter(function (x) { return x.id !== id; });
+    save(); render();
+  };
+  window.retryJob = function (id) {
+    var j = jobs.find(function (x) { return x.id === id; });
+    if (j) { j.error = false; geocode(j); render(); }
+  };
+  $('clearDoneBtn').addEventListener('click', function () {
+    jobs = jobs.filter(function (x) { return x.status !== 'done'; });
+    save(); render();
+  });
+  $('clearAllBtn').addEventListener('click', function () {
+    if (confirm('Clear all jobs?')) { jobs = []; save(); render(); }
+  });
+
+  function navUrl(j) {
+    return 'https://www.google.com/maps/dir/?api=1&destination=' + j.lat + ',' + j.lon;
+  }
+  function appleUrl(j) {
+    return 'https://maps.apple.com/?daddr=' + j.lat + ',' + j.lon;
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  // ---------- render ----------
+  function render() {
+    var queued = jobs.filter(function (j) { return j.status === 'queued'; });
+    var done = jobs.filter(function (j) { return j.status === 'done'; });
+
+    // compute distances from GPS, or from the manual start point if no fix yet
+    var p = posNow();
+    queued.forEach(function (j) {
+      j._km = (p && j.lat != null) ? haversineKm(p, j) : null;
+    });
+    // located jobs sorted by distance first, then pending lookups, then errors
+    queued.sort(function (a, b) {
+      if (a.error !== b.error) return a.error ? 1 : -1;
+      if ((a._km == null) !== (b._km == null)) return a._km == null ? 1 : -1;
+      return (a._km || 0) - (b._km || 0);
+    });
+
+    var next = queued.length && !queued[0].error && queued[0].lat != null ? queued[0] : null;
+    var rest = next ? queued.slice(1) : queued;
+
+    // next card
+    var nw = $('nextWrap');
+    if (next) {
+      var d = fmtDist(next._km);
+      nw.innerHTML =
+        '<div class="next-card">' +
+          '<div class="eyebrow">Next job</div>' +
+          '<div class="addr">' + esc(next.label) + '</div>' +
+          (next.display ? '<div class="sub">' + esc(next.display) + '</div>' : '') +
+          '<div class="dist">' + d.n + '<small>' + d.u + (posNow() ? ' away' : '') + '</small></div>' +
+          '<div class="btn-row">' +
+            '<a class="btn btn-nav" href="' + navUrl(next) + '" target="_blank" rel="noopener">Google&nbsp;Maps</a>' +
+            '<a class="btn btn-nav" href="' + appleUrl(next) + '" target="_blank" rel="noopener">Apple&nbsp;Maps</a>' +
+            '<button class="btn btn-done" onclick="markDone(\'' + next.id + '\')">Delivered</button>' +
+          '</div>' +
+        '</div>';
+    } else {
+      nw.innerHTML = '';
+    }
+
+    // queue list
+    var ql = $('queueList');
+    ql.innerHTML = rest.map(function (j) {
+      var d = fmtDist(j._km);
+      var cls = 'job' + (j.lat == null && !j.error ? ' pending-geo' : '');
+      var sub = j.error ? 'Address not found' : (j.lat == null ? 'Looking up\u2026' : (j.display || ''));
+      var actions = j.error
+        ? '<button class="mini" onclick="retryJob(\'' + j.id + '\')">Retry</button>' +
+          '<button class="mini" onclick="removeJob(\'' + j.id + '\')">Remove</button>'
+        : '<button class="mini" onclick="markDone(\'' + j.id + '\')">Done</button>' +
+          '<button class="mini" onclick="removeJob(\'' + j.id + '\')">\u2715</button>';
+      return '<div class="' + cls + '">' +
+        '<div class="info"><div class="addr">' + esc(j.label) + '</div>' +
+        '<div class="sub">' + esc(sub) + '</div></div>' +
+        '<div class="dist">' + d.n + '<small>' + d.u + '</small></div>' +
+        actions + '</div>';
+    }).join('');
+
+    $('queueLabel').style.display = rest.length ? 'flex' : 'none';
+    $('queueCount').textContent = rest.length + ' more';
+    $('emptyState').style.display = jobs.length ? 'none' : 'block';
+
+    // done list
+    var dl = $('doneList');
+    dl.innerHTML = done.map(function (j) {
+      return '<div class="job done">' +
+        '<div class="info"><div class="addr">' + esc(j.label) + '</div></div>' +
+        '<button class="mini" onclick="undoDone(\'' + j.id + '\')">Undo</button>' +
+        '<button class="mini" onclick="removeJob(\'' + j.id + '\')">\u2715</button></div>';
+    }).join('');
+    $('doneLabel').style.display = done.length ? 'flex' : 'none';
+    $('doneCount').textContent = done.length;
+  }
+
+  render();
+  // re-geocode anything that was saved mid-lookup
+  jobs.forEach(function (j) { if (j.lat == null && !j.error && j.status === 'queued') geocode(j); });
+})();
+</script>
+</body>
+</html>
