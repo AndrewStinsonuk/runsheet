@@ -404,6 +404,21 @@
     tollBusy = true;
     Promise.all([fetchRoute(p, next, false), fetchRoute(p, next, true)])
       .then(function (r) {
+        if (r[0] && !r[1]) {
+          // Destination pin sits on a toll-tagged road; retry to a point
+          // pulled back toward us so the comparison still works (approx).
+          var dist = haversineKm(p, next);
+          var t = Math.min(0.35, 0.5 / Math.max(dist, 0.5));
+          var back = { lat: next.lat + (p.lat - next.lat) * t,
+                       lon: next.lon + (p.lon - next.lon) * t };
+          return fetchRoute(p, back, true).then(function (r2) {
+            if (r2) r2.approx = true;
+            return [r[0], r2];
+          });
+        }
+        return r;
+      })
+      .then(function (r) {
         if (r[0]) {
           next._tollRoute = r[0];
           next._noTollRoute = r[1];
@@ -445,14 +460,14 @@
       if (next._tollRoute) {
         var t = next._tollRoute, n = next._noTollRoute;
         if (!n) {
-          tollLine = '<div class="sub" style="margin-top:-8px">No toll-free route found</div>';
-        } else if (Math.abs(t.mins - n.mins) < 1 && Math.abs(t.km - n.km) < 0.3) {
+          tollLine = '<div class="sub" style="margin-top:-8px">Toll-free comparison unavailable for this destination</div>';
+        } else if (!n.approx && Math.abs(t.mins - n.mins) < 1 && Math.abs(t.km - n.km) < 0.3) {
           tollLine = '<div class="sub" style="margin-top:-8px">No toll roads on this route</div>';
         } else {
           tollLine = '<div class="sub" style="margin-top:-8px"><span style="color:var(--amber)">Tolls:</span> ' +
                      t.km.toFixed(1) + ' km \u00b7 ' + t.mins + ' min &nbsp;&nbsp;' +
-                     '<span style="color:var(--amber)">No tolls:</span> ' +
-                     n.km.toFixed(1) + ' km \u00b7 ' + n.mins + ' min</div>';
+                     '<span style="color:var(--amber)">No tolls:</span> ' + (n.approx ? '\u2248' : '') +
+                     n.km.toFixed(1) + ' km \u00b7 ' + (n.approx ? '\u2248' : '') + n.mins + ' min</div>';
         }
       }
       nw.innerHTML =
