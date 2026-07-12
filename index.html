@@ -108,7 +108,7 @@
   <button id="clearAllBtn">Clear all</button>
 </div>
 
-<p class="note">Distances are driving distance where available (straight-line until the route loads), recalculated as you move.<br>Geocoding: OpenStreetMap Nominatim &amp; Photon. Routing: OSRM.</p>
+<p class="note">Distances are driving distance where available (straight-line until the route loads), recalculated as you move.<br>Geocoding: OpenStreetMap Nominatim &amp; Photon. Routing: OSRM &amp; openrouteservice.</p>
 
 <script>
 (function () {
@@ -380,6 +380,27 @@
   }
 
   // ---------- toll vs no-toll comparison for the next job ----------
+  // Primary: openrouteservice (needs free key below). Fallback: OSRM exclude=toll.
+  var ORS_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjI1NWE4ODE0MjUwYzQ4MDRhNTA4NjYwMThhNDIyOWRiIiwiaCI6Im11cm11cjY0In0=';
+  function orsRoute(p, j, avoidTolls) {
+    if (!ORS_KEY || ORS_KEY.indexOf('PASTE') === 0) return Promise.resolve(null);
+    var body = { coordinates: [[p.lon, p.lat], [j.lon, j.lat]] };
+    if (avoidTolls) body.options = { avoid_features: ['tollways'] };
+    return fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
+      method: 'POST',
+      headers: { 'Authorization': ORS_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res && res.routes && res.routes[0] && res.routes[0].summary) {
+          return { km: res.routes[0].summary.distance / 1000,
+                   mins: Math.round(res.routes[0].summary.duration / 60) };
+        }
+        return null;
+      })
+      .catch(function () { return null; });
+  }
   var tollJobId = null, tollOrigin = null, tollBusy = false;
   function fetchRoute(p, j, excludeToll) {
     var url = 'https://router.project-osrm.org/route/v1/driving/' +
@@ -416,12 +437,14 @@
     if (tollBusy) return;
     if (next.id === tollJobId && !moved) return;
     tollBusy = true;
-    Promise.all([fetchRoute(p, next, false), fetchRoute(p, next, true)])
+    var haveOrs = ORS_KEY && ORS_KEY.indexOf('PASTE') !== 0;
+    var pair = haveOrs
+      ? Promise.all([orsRoute(p, next, false), orsRoute(p, next, true)])
+      : Promise.all([fetchRoute(p, next, false), fetchRoute(p, next, true)]);
+    pair
       .then(function (r) {
-        if (r[0] && !r[1]) {
-          // Origin or destination snapped onto a toll-tagged road; retry with
-          // the ends nudged clear of it (approx result). Tries: destination
-          // pulled back, then origin pushed forward, then both.
+        if (r[0] && !r[1] && !haveOrs) {
+          // OSRM-only fallback: nudge the ends clear of toll-tagged roads.
           var variants = [
             { from: p, to: shiftPoint(next, p, 0.5) },
             { from: p, to: shiftPoint(next, p, 2) },
