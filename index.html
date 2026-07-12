@@ -395,15 +395,18 @@
       })
       .catch(function () { return null; });
   }
-  function tryPullback(p, next, offsets, idx) {
-    if (idx >= offsets.length) return Promise.resolve(null);
-    var dist = haversineKm(p, next);
-    var t = Math.min(0.45, offsets[idx] / Math.max(dist, 0.1));
-    var back = { lat: next.lat + (p.lat - next.lat) * t,
-                 lon: next.lon + (p.lon - next.lon) * t };
-    return fetchRoute(p, back, true).then(function (r2) {
+  function shiftPoint(from, toward, km) {
+    var dist = haversineKm(from, toward);
+    var t = Math.min(0.45, km / Math.max(dist, 0.1));
+    return { lat: from.lat + (toward.lat - from.lat) * t,
+             lon: from.lon + (toward.lon - from.lon) * t };
+  }
+  function tryVariants(variants, idx) {
+    if (idx >= variants.length) return Promise.resolve(null);
+    var v = variants[idx];
+    return fetchRoute(v.from, v.to, true).then(function (r2) {
       if (r2) { r2.approx = true; return r2; }
-      return tryPullback(p, next, offsets, idx + 1);
+      return tryVariants(variants, idx + 1);
     });
   }
   function maybeTollUpdate(next) {
@@ -416,9 +419,18 @@
     Promise.all([fetchRoute(p, next, false), fetchRoute(p, next, true)])
       .then(function (r) {
         if (r[0] && !r[1]) {
-          // Destination pin sits on toll-tagged roads; step progressively
-          // back toward us until a toll-free route resolves (approx result).
-          return tryPullback(p, next, [0.5, 2, 6], 0).then(function (r2) {
+          // Origin or destination snapped onto a toll-tagged road; retry with
+          // the ends nudged clear of it (approx result). Tries: destination
+          // pulled back, then origin pushed forward, then both.
+          var variants = [
+            { from: p, to: shiftPoint(next, p, 0.5) },
+            { from: p, to: shiftPoint(next, p, 2) },
+            { from: p, to: shiftPoint(next, p, 6) },
+            { from: shiftPoint(p, next, 0.5), to: next },
+            { from: shiftPoint(p, next, 2), to: next },
+            { from: shiftPoint(p, next, 2), to: shiftPoint(next, p, 2) }
+          ];
+          return tryVariants(variants, 0).then(function (r2) {
             return [r[0], r2];
           });
         }
