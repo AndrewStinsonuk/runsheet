@@ -386,16 +386,23 @@
     if (!ORS_KEY || ORS_KEY.indexOf('PASTE') === 0) return Promise.resolve(null);
     var body = { coordinates: [[p.lon, p.lat], [j.lon, j.lat]] };
     if (avoidTolls) body.options = { avoid_features: ['tollways'] };
-    return fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
+    return fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
       method: 'POST',
       headers: { 'Authorization': ORS_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     })
       .then(function (r) { return r.json(); })
       .then(function (res) {
-        if (res && res.routes && res.routes[0] && res.routes[0].summary) {
-          return { km: res.routes[0].summary.distance / 1000,
-                   mins: Math.round(res.routes[0].summary.duration / 60) };
+        var f = res && res.features && res.features[0];
+        if (f && f.properties && f.properties.summary) {
+          var out = { km: f.properties.summary.distance / 1000,
+                      mins: Math.round(f.properties.summary.duration / 60) };
+          var coords = f.geometry && f.geometry.coordinates;
+          if (coords && coords.length > 2) {
+            var mid = coords[Math.floor(coords.length / 2)];
+            out.via = { lat: mid[1], lon: mid[0] };
+          }
+          return out;
         }
         return null;
       })
@@ -511,6 +518,20 @@
                      n.km.toFixed(1) + ' km \u00b7 ' + (n.approx ? '\u2248' : '') + n.mins + ' min</div>';
         }
       }
+      var routesDiffer = next._tollRoute && next._noTollRoute &&
+          !(Math.abs(next._tollRoute.mins - next._noTollRoute.mins) < 1 &&
+            Math.abs(next._tollRoute.km - next._noTollRoute.km) < 0.3);
+      var navBtns;
+      if (routesDiffer && next._noTollRoute.via) {
+        var v = next._noTollRoute.via;
+        var noTollUrl = 'https://www.google.com/maps/dir/?api=1&destination=' +
+                        next.lat + ',' + next.lon +
+                        '&waypoints=' + v.lat + ',' + v.lon + '&travelmode=driving';
+        navBtns = '<a class="btn btn-nav" href="' + navUrl(next) + '" target="runsheet_nav" rel="noopener">Tolls</a>' +
+                  '<a class="btn btn-nav" href="' + noTollUrl + '" target="runsheet_nav" rel="noopener">No&nbsp;Tolls</a>';
+      } else {
+        navBtns = '<a class="btn btn-nav" href="' + navUrl(next) + '" target="runsheet_nav" rel="noopener">Navigate</a>';
+      }
       nw.innerHTML =
         '<div class="next-card">' +
           '<div class="eyebrow" style="display:flex;justify-content:space-between;align-items:center">' +
@@ -523,7 +544,7 @@
             (next._mins != null ? ' \u00b7 ' + next._mins + ' min' : (posNow() ? ' away' : '')) + '</small></div>' +
           tollLine +
           '<div class="btn-row">' +
-            '<a class="btn btn-nav" href="' + navUrl(next) + '" target="runsheet_nav" rel="noopener">Navigate</a>' +
+            navBtns +
             '<button class="btn btn-done" onclick="markDone(\'' + next.id + '\')">Delivered</button>' +
           '</div>' +
         '</div>';
