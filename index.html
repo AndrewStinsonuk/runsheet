@@ -395,6 +395,17 @@
       })
       .catch(function () { return null; });
   }
+  function tryPullback(p, next, offsets, idx) {
+    if (idx >= offsets.length) return Promise.resolve(null);
+    var dist = haversineKm(p, next);
+    var t = Math.min(0.45, offsets[idx] / Math.max(dist, 0.1));
+    var back = { lat: next.lat + (p.lat - next.lat) * t,
+                 lon: next.lon + (p.lon - next.lon) * t };
+    return fetchRoute(p, back, true).then(function (r2) {
+      if (r2) { r2.approx = true; return r2; }
+      return tryPullback(p, next, offsets, idx + 1);
+    });
+  }
   function maybeTollUpdate(next) {
     var p = posNow();
     if (!p || !next || next.lat == null) return;
@@ -405,14 +416,9 @@
     Promise.all([fetchRoute(p, next, false), fetchRoute(p, next, true)])
       .then(function (r) {
         if (r[0] && !r[1]) {
-          // Destination pin sits on a toll-tagged road; retry to a point
-          // pulled back toward us so the comparison still works (approx).
-          var dist = haversineKm(p, next);
-          var t = Math.min(0.35, 0.5 / Math.max(dist, 0.5));
-          var back = { lat: next.lat + (p.lat - next.lat) * t,
-                       lon: next.lon + (p.lon - next.lon) * t };
-          return fetchRoute(p, back, true).then(function (r2) {
-            if (r2) r2.approx = true;
+          // Destination pin sits on toll-tagged roads; step progressively
+          // back toward us until a toll-free route resolves (approx result).
+          return tryPullback(p, next, [0.5, 2, 6], 0).then(function (r2) {
             return [r[0], r2];
           });
         }
