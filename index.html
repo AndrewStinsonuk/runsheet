@@ -387,7 +387,7 @@
 
   // ---------- toll vs no-toll comparison for the next job ----------
   // Primary: openrouteservice (needs free key below). Fallback: OSRM exclude=toll.
-  var ORS_KEY = 'PASTE_YOUR_ORS_KEY_HERE';
+  var ORS_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjI1NWE4ODE0MjUwYzQ4MDRhNTA4NjYwMThhNDIyOWRiIiwiaCI6Im11cm11cjY0In0=';
   function orsRoute(p, j, avoidTolls) {
     if (!ORS_KEY || ORS_KEY.indexOf('PASTE') === 0) return Promise.resolve(null);
     var body = { coordinates: [[p.lon, p.lat], [j.lon, j.lat]] };
