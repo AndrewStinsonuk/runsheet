@@ -108,7 +108,7 @@
   <button id="clearAllBtn">Clear all</button>
 </div>
 
-<p class="note">Distances are driving distance where available (straight-line until the route loads), recalculated as you move.<br>Geocoding: OpenStreetMap Nominatim &amp; Photon. Routing: OSRM &amp; openrouteservice.</p>
+<p class="note">Searches are limited to Victoria. Distances are driving distance where available, recalculated as you move.<br>Geocoding: OpenStreetMap Nominatim &amp; Photon. Routing: OSRM &amp; openrouteservice.</p>
 
 <script>
 (function () {
@@ -156,13 +156,18 @@
     geoQueue.push(job);
     pumpGeo();
   }
+  // Victoria bounding box: lon 140.95-150.05, lat -39.25 to -33.95
+  function inVic(lat, lon) {
+    return lat <= -33.95 && lat >= -39.25 && lon >= 140.95 && lon <= 150.05;
+  }
   function tryNominatim(q) {
-    var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=au&q=' +
+    var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=au' +
+              '&viewbox=140.95,-33.95,150.05,-39.25&bounded=1&q=' +
               encodeURIComponent(q);
     return fetch(url, { headers: { 'Accept': 'application/json' } })
       .then(function (r) { return r.json(); })
       .then(function (res) {
-        if (res && res.length) {
+        if (res && res.length && inVic(parseFloat(res[0].lat), parseFloat(res[0].lon))) {
           return { lat: parseFloat(res[0].lat), lon: parseFloat(res[0].lon), display: res[0].display_name };
         }
         return null;
@@ -170,15 +175,16 @@
   }
   function tryPhoton(q) {
     // Fuzzy place/business search on OSM data; biased toward current GPS position
-    // so e.g. "Bunnings" resolves to the nearest Bunnings.
-    var url = 'https://photon.komoot.io/api/?limit=5&q=' + encodeURIComponent(q);
+    // so e.g. "Bunnings" resolves to the nearest Bunnings. Limited to Victoria.
+    var url = 'https://photon.komoot.io/api/?limit=5&bbox=140.95,-39.25,150.05,-33.95&q=' + encodeURIComponent(q);
     var p = posNow();
     if (p) url += '&lat=' + p.lat + '&lon=' + p.lon;
     return fetch(url, { headers: { 'Accept': 'application/json' } })
       .then(function (r) { return r.json(); })
       .then(function (res) {
         var feats = (res && res.features) ? res.features.filter(function (f) {
-          return f.properties && f.properties.countrycode === 'AU';
+          return f.properties && f.properties.countrycode === 'AU' &&
+                 f.geometry && inVic(f.geometry.coordinates[1], f.geometry.coordinates[0]);
         }) : [];
         if (!feats.length) return null;
         var f = feats[0], p = f.properties;
@@ -205,7 +211,7 @@
           setStatus('');
         } else {
           job.error = true;
-          setStatus('Couldn\u2019t find "' + job.label + '" \u2014 try adding a suburb, or use the street address.', true);
+          setStatus('Couldn\u2019t find "' + job.label + '" in Victoria \u2014 try adding a suburb, or use the street address.', true);
         }
         save(); render();
       })
@@ -278,7 +284,7 @@
           setStatus('');
           render();
         } else {
-          setStatus('Couldn\u2019t find start point "' + q + '".', true);
+          setStatus('Couldn\u2019t find start point "' + q + '" in Victoria.', true);
         }
       })
       .catch(function () { setStatus('Network problem looking up start point.', true); });
@@ -381,7 +387,7 @@
 
   // ---------- toll vs no-toll comparison for the next job ----------
   // Primary: openrouteservice (needs free key below). Fallback: OSRM exclude=toll.
-  var ORS_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjI1NWE4ODE0MjUwYzQ4MDRhNTA4NjYwMThhNDIyOWRiIiwiaCI6Im11cm11cjY0In0=';
+  var ORS_KEY = 'PASTE_YOUR_ORS_KEY_HERE';
   function orsRoute(p, j, avoidTolls) {
     if (!ORS_KEY || ORS_KEY.indexOf('PASTE') === 0) return Promise.resolve(null);
     var body = { coordinates: [[p.lon, p.lat], [j.lon, j.lat]] };
