@@ -248,7 +248,7 @@
 
   // ---------- GPS ----------
   var gpsDot = $('gpsDot'), gpsText = $('gpsText');
-  var gpsWatchId = null;
+  var gpsWatchId = null, lastFix = null, lastFixTime = 0;
   function startGPS() {
     if (!navigator.geolocation) { gpsDot.className = 'gps-dot err'; gpsText.textContent = 'No GPS support'; return; }
     if (gpsWatchId != null) navigator.geolocation.clearWatch(gpsWatchId);
@@ -257,7 +257,14 @@
       here = { lat: pos.coords.latitude, lon: pos.coords.longitude };
       gpsDot.className = 'gps-dot on';
       gpsText.textContent = 'GPS live';
-      render();
+      // Only redraw when we've actually moved (>25 m) or every 5 s,
+      // so the screen doesn't flicker on every GPS tick while parked.
+      var now = Date.now();
+      if (!lastFix || haversineKm(lastFix, here) > 0.025 || now - lastFixTime > 5000) {
+        lastFix = { lat: here.lat, lon: here.lon };
+        lastFixTime = now;
+        render();
+      }
     }, function (err) {
       gpsDot.className = 'gps-dot err';
       var reason = err.code === 1 ? 'GPS denied' : (err.code === 2 ? 'GPS unavailable' : 'GPS timeout');
