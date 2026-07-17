@@ -481,8 +481,15 @@
       : Promise.all([fetchRoute(p, next, false), fetchRoute(p, next, true)]);
     pair
       .then(function (r) {
-        if (r[0] && !r[1] && !haveOrs) {
-          // OSRM-only fallback: nudge the ends clear of toll-tagged roads.
+        if (haveOrs && !r[0]) {
+          // ORS didn't answer (outage/quota/network) — fall back to OSRM this round
+          return Promise.all([fetchRoute(p, next, false), fetchRoute(p, next, true)]);
+        }
+        return r;
+      })
+      .then(function (r) {
+        if (r[0] && !r[1]) {
+          // No toll-free result: nudge the ends clear of toll-tagged roads.
           var variants = [
             { from: p, to: shiftPoint(next, p, 0.5) },
             { from: p, to: shiftPoint(next, p, 2) },
