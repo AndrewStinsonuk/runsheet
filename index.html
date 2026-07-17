@@ -412,16 +412,8 @@
 
   // ---------- toll vs no-toll comparison for the next job ----------
   // Primary: openrouteservice (needs free key below). Fallback: OSRM exclude=toll.
-  var ORS_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjI1NWE4ODE0MjUwYzQ4MDRhNTA4NjYwMThhNDIyOWRiIiwiaCI6Im11cm11cjY0In0=';
-  function orsRoute(p, j, avoidTolls) {
-    if (!ORS_KEY || ORS_KEY.indexOf('PASTE') === 0) return Promise.resolve(null);
-    var body = { coordinates: [[p.lon, p.lat], [j.lon, j.lat]] };
-    if (avoidTolls) {
-      body.options = { avoid_features: ['tollways'] };
-    } else {
-      // Ask for up to 3 alternative routes (e.g. two different toll corridors)
-      body.alternative_routes = { target_count: 3, share_factor: 0.6, weight_factor: 1.6 };
-    }
+  var ORS_KEY = 'PASTE_YOUR_ORS_KEY_HERE';
+  function orsFetch(body) {
     return fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
       method: 'POST',
       headers: { 'Authorization': ORS_KEY, 'Content-Type': 'application/json' },
@@ -442,12 +434,28 @@
           }
           return out;
         }).filter(Boolean);
-        if (!routes.length) return null;
-        // first = primary; keep the rest as alternatives on the object
-        routes[0].alts = routes.slice(1);
-        return routes[0];
+        return routes.length ? routes : null;
       })
       .catch(function () { return null; });
+  }
+  function orsRoute(p, j, avoidTolls) {
+    if (!ORS_KEY || ORS_KEY.indexOf('PASTE') === 0) return Promise.resolve(null);
+    var base = { coordinates: [[p.lon, p.lat], [j.lon, j.lat]] };
+    if (avoidTolls) {
+      base.options = { avoid_features: ['tollways'] };
+      return orsFetch(base).then(function (rs) { return rs ? rs[0] : null; });
+    }
+    // Try for alternative routes first; if that request fails for any reason,
+    // fall back to a plain single-route request so the comparison still works.
+    var withAlts = { coordinates: base.coordinates,
+                     alternative_routes: { target_count: 3, share_factor: 0.6, weight_factor: 1.6 } };
+    return orsFetch(withAlts).then(function (rs) {
+      if (rs && rs.length) {
+        rs[0].alts = rs.slice(1);
+        return rs[0];
+      }
+      return orsFetch(base).then(function (rs2) { return rs2 ? rs2[0] : null; });
+    });
   }
   var tollJobId = null, tollOrigin = null, tollBusy = false;
   function fetchRoute(p, j, excludeToll) {
