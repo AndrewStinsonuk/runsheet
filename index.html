@@ -416,7 +416,12 @@
   function orsRoute(p, j, avoidTolls) {
     if (!ORS_KEY || ORS_KEY.indexOf('PASTE') === 0) return Promise.resolve(null);
     var body = { coordinates: [[p.lon, p.lat], [j.lon, j.lat]] };
-    if (avoidTolls) body.options = { avoid_features: ['tollways'] };
+    if (avoidTolls) {
+      body.options = { avoid_features: ['tollways'] };
+    } else {
+      // Ask for up to 3 alternative routes (e.g. two different toll corridors)
+      body.alternative_routes = { target_count: 3, share_factor: 0.6, weight_factor: 1.6 };
+    }
     return fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
       method: 'POST',
       headers: { 'Authorization': ORS_KEY, 'Content-Type': 'application/json' },
@@ -424,8 +429,10 @@
     })
       .then(function (r) { return r.json(); })
       .then(function (res) {
-        var f = res && res.features && res.features[0];
-        if (f && f.properties && f.properties.summary) {
+        var feats = res && res.features;
+        if (!feats || !feats.length) return null;
+        var routes = feats.map(function (f) {
+          if (!f.properties || !f.properties.summary) return null;
           var out = { km: f.properties.summary.distance / 1000,
                       mins: Math.round(f.properties.summary.duration / 60) };
           var coords = f.geometry && f.geometry.coordinates;
@@ -434,8 +441,11 @@
             out.via = { lat: mid[1], lon: mid[0] };
           }
           return out;
-        }
-        return null;
+        }).filter(Boolean);
+        if (!routes.length) return null;
+        // first = primary; keep the rest as alternatives on the object
+        routes[0].alts = routes.slice(1);
+        return routes[0];
       })
       .catch(function () { return null; });
   }
@@ -508,6 +518,19 @@
         if (r[0]) {
           next._tollRoute = r[0];
           next._noTollRoute = r[1];
+          // Pick a genuinely different alternative (not a near-duplicate of the
+          // primary or the no-toll route) if ORS offered one.
+          next._altRoute = null;
+          var alts = r[0].alts || [];
+          function similar(a, b) {
+            return a && b && Math.abs(a.km - b.km) < 0.3 && Math.abs(a.mins - b.mins) < 1;
+          }
+          for (var ai = 0; ai < alts.length; ai++) {
+            if (!similar(alts[ai], r[0]) && !similar(alts[ai], r[1])) {
+              next._altRoute = alts[ai];
+              break;
+            }
+          }
           tollJobId = next.id;
           tollOrigin = { lat: p.lat, lon: p.lon };
           render();
@@ -550,31 +573,54 @@
       var d = fmtDist(next._km);
       var tollLine = '';
       if (next._tollRoute) {
-        var t = next._tollRoute, n = next._noTollRoute;
-        if (!n) {
+        var t = next._tollRoute, n = next._noTollRoute, alt = next._altRoute;
+        if (!n && !alt) {
           tollLine = '<div class="sub" style="margin-top:-8px">Toll-free comparison unavailable for this destination</div>';
-        } else if (!n.approx && Math.abs(t.mins - n.mins) < 1 && Math.abs(t.km - n.km) < 0.3) {
+        } else if (n && !alt && !n.approx && Math.abs(t.mins - n.mins) < 1 && Math.abs(t.km - n.km) < 0.3) {
           tollLine = '<div class="sub" style="margin-top:-8px">No toll roads on this route</div>';
         } else {
-          tollLine = '<div class="sub" style="margin-top:-8px"><span style="color:var(--amber)">Tolls:</span> ' +
-                     t.km.toFixed(1) + ' km \u00b7 ' + t.mins + ' min &nbsp;&nbsp;' +
-                     '<span style="color:var(--amber)">No tolls:</span> ' + (n.approx ? '\u2248' : '') +
-                     n.km.toFixed(1) + ' km \u00b7 ' + (n.approx ? '\u2248' : '') + n.mins + ' min</div>';
+          var rows = '<span style="color:var(--amber)">Fastest:</span> ' +
+                     t.km.toFixed(1) + ' km \u00b7 ' + t.mins + ' min';
+          if (alt) {
+            rows += '<br><span style="color:var(--amber)">Alt route:</span> ' +
+                    alt.km.toFixed(1) + ' km \u00b7 ' + alt.mins + ' min';
+          }
+          if (n) {
+            rows += '<br><span style="color:var(--amber)">No tolls:</span> ' + (n.approx ? '\u2248' : '') +
+                    n.km.toFixed(1) + ' km \u00b7 ' + (n.approx ? '\u2248' : '') + n.mins + ' min';
+          } else {
+            rows += '<br><span style="color:var(--amber)">No tolls:</span> unavailable';
+          }
+          tollLine = '<div class="sub" style="margin-top:-8px;line-height:1.7">' + rows + '</div>';
         }
       }
       var routesDiffer = next._tollRoute && next._noTollRoute &&
           !(Math.abs(next._tollRoute.mins - next._noTollRoute.mins) < 1 &&
             Math.abs(next._tollRoute.km - next._noTollRoute.km) < 0.3);
-      var navBtns;
-      if (routesDiffer && next._noTollRoute.via) {
-        var v = next._noTollRoute.via;
-        var noTollUrl = 'https://www.google.com/maps/dir/?api=1&destination=' +
-                        next.lat + ',' + next.lon +
-                        '&waypoints=' + v.lat + ',' + v.lon + '&travelmode=driving';
-        navBtns = '<a class="btn btn-nav" href="' + navUrl(next) + '" target="runsheet_nav" rel="noopener">Tolls</a>' +
-                  '<a class="btn btn-nav" href="' + noTollUrl + '" target="runsheet_nav" rel="noopener">No&nbsp;Tolls</a>';
+      function viaUrl(route) {
+        return 'https://www.google.com/maps/dir/?api=1&destination=' +
+               next.lat + ',' + next.lon +
+               (route && route.via ? '&waypoints=' + route.via.lat + ',' + route.via.lon : '') +
+               '&travelmode=driving';
+      }
+      var navBtns, altBtnRow = '';
+      if ((routesDiffer && next._noTollRoute.via) || next._altRoute) {
+        navBtns = '<a class="btn btn-nav" href="' + navUrl(next) + '" target="runsheet_nav" rel="noopener">Fastest</a>';
+        if (next._altRoute && next._altRoute.via) {
+          navBtns += '<a class="btn btn-nav" href="' + viaUrl(next._altRoute) + '" target="runsheet_nav" rel="noopener">Alt</a>';
+        }
+        if (routesDiffer && next._noTollRoute.via) {
+          navBtns += '<a class="btn btn-nav" href="' + viaUrl(next._noTollRoute) + '" target="runsheet_nav" rel="noopener">No&nbsp;Tolls</a>';
+        }
+        altBtnRow = '<div class="btn-row">' + navBtns + '</div>' +
+                    '<div class="btn-row" style="margin-top:8px">' +
+                      '<button class="btn btn-done" onclick="markDone(\'' + next.id + '\')">Delivered</button>' +
+                    '</div>';
       } else {
-        navBtns = '<a class="btn btn-nav" href="' + navUrl(next) + '" target="runsheet_nav" rel="noopener">Navigate</a>';
+        altBtnRow = '<div class="btn-row">' +
+                      '<a class="btn btn-nav" href="' + navUrl(next) + '" target="runsheet_nav" rel="noopener">Navigate</a>' +
+                      '<button class="btn btn-done" onclick="markDone(\'' + next.id + '\')">Delivered</button>' +
+                    '</div>';
       }
       nw.innerHTML =
         '<div class="next-card">' +
@@ -587,10 +633,7 @@
           '<div class="dist">' + d.n + '<small>' + d.u +
             (next._mins != null ? ' \u00b7 ' + next._mins + ' min' : (posNow() ? ' away' : '')) + '</small></div>' +
           tollLine +
-          '<div class="btn-row">' +
-            navBtns +
-            '<button class="btn btn-done" onclick="markDone(\'' + next.id + '\')">Delivered</button>' +
-          '</div>' +
+          altBtnRow +
         '</div>';
     } else {
       nw.innerHTML = '';
