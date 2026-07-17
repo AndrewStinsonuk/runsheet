@@ -412,7 +412,7 @@
 
   // ---------- toll vs no-toll comparison for the next job ----------
   // Primary: openrouteservice (needs free key below). Fallback: OSRM exclude=toll.
-  var ORS_KEY = 'PASTE_YOUR_ORS_KEY_HERE';
+  var ORS_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjI1NWE4ODE0MjUwYzQ4MDRhNTA4NjYwMThhNDIyOWRiIiwiaCI6Im11cm11cjY0In0=';
   function orsFetch(body) {
     return fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
       method: 'POST',
