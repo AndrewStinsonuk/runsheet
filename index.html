@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -496,11 +497,17 @@
     var queued = jobs.filter(function (j) { return j.status === 'queued'; });
     var done = jobs.filter(function (j) { return j.status === 'done'; });
 
-    // compute distances: road distance when we have it, straight-line otherwise
+    // compute distances: road distance when we have it (counted down by how far
+    // we've travelled since it was fetched), straight-line otherwise
     var p = posNow();
+    var travelled = (p && routeOrigin) ? haversineKm(routeOrigin, p) : 0;
     queued.forEach(function (j) {
       var straight = (p && j.lat != null) ? haversineKm(p, j) : null;
-      j._km = (j._roadKm != null) ? j._roadKm : straight;
+      if (j._roadKm != null && straight != null) {
+        j._km = Math.max(straight, j._roadKm - travelled);
+      } else {
+        j._km = (j._roadKm != null) ? j._roadKm : straight;
+      }
     });
     // located jobs sorted by distance first, then pending lookups, then errors
     queued.sort(function (a, b) {
