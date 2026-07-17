@@ -412,24 +412,17 @@
 
   // ---------- toll vs no-toll comparison for the next job ----------
   // Primary: openrouteservice (needs free key below). Fallback: OSRM exclude=toll.
-  var ORS_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjI1NWE4ODE0MjUwYzQ4MDRhNTA4NjYwMThhNDIyOWRiIiwiaCI6Im11cm11cjY0In0=';
-  var tollJobId = null, tollOrigin = null, tollBusy = false, tollTrace = [];
-  function orsFetch(body, label) {
+  var ORS_KEY = 'PASTE_YOUR_ORS_KEY_HERE';
+  function orsFetch(body) {
     return fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
       method: 'POST',
       headers: { 'Authorization': ORS_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     })
-      .then(function (r) {
-        tollTrace.push(label + ' ' + r.status);
-        return r.json();
-      })
+      .then(function (r) { return r.json(); })
       .then(function (res) {
         var feats = res && res.features;
-        if (!feats || !feats.length) {
-          if (res && res.error) tollTrace.push(label + ' err:' + (res.error.code || res.error.message || 'unknown'));
-          return null;
-        }
+        if (!feats || !feats.length) return null;
         var routes = feats.map(function (f) {
           if (!f.properties || !f.properties.summary) return null;
           var out = { km: f.properties.summary.distance / 1000,
@@ -443,29 +436,29 @@
         }).filter(Boolean);
         return routes.length ? routes : null;
       })
-      .catch(function () { tollTrace.push(label + ' net-fail'); return null; });
+      .catch(function () { return null; });
   }
   function orsRoute(p, j, avoidTolls) {
     if (!ORS_KEY || ORS_KEY.indexOf('PASTE') === 0) return Promise.resolve(null);
     var base = { coordinates: [[p.lon, p.lat], [j.lon, j.lat]] };
     if (avoidTolls) {
       base.options = { avoid_features: ['tollways'] };
-      return orsFetch(base, 'ORS-notoll').then(function (rs) { return rs ? rs[0] : null; });
+      return orsFetch(base).then(function (rs) { return rs ? rs[0] : null; });
     }
     // Try for alternative routes first; if that request fails for any reason,
     // fall back to a plain single-route request so the comparison still works.
     var withAlts = { coordinates: base.coordinates,
                      alternative_routes: { target_count: 3, share_factor: 0.6, weight_factor: 1.6 } };
-    return orsFetch(withAlts, 'ORS-alts').then(function (rs) {
+    return orsFetch(withAlts).then(function (rs) {
       if (rs && rs.length) {
         rs[0].alts = rs.slice(1);
         return rs[0];
       }
-      return orsFetch(base, 'ORS-plain').then(function (rs2) { return rs2 ? rs2[0] : null; });
+      return orsFetch(base).then(function (rs2) { return rs2 ? rs2[0] : null; });
     });
   }
+  var tollJobId = null, tollOrigin = null, tollBusy = false;
   function fetchRoute(p, j, excludeToll) {
-    var lbl = excludeToll ? 'OSRM-notoll' : 'OSRM';
     var url = 'https://router.project-osrm.org/route/v1/driving/' +
               p.lon + ',' + p.lat + ';' + j.lon + ',' + j.lat +
               '?overview=false' + (excludeToll ? '&exclude=toll' : '');
@@ -473,13 +466,11 @@
       .then(function (r) { return r.json(); })
       .then(function (res) {
         if (res && res.code === 'Ok' && res.routes && res.routes[0]) {
-          tollTrace.push(lbl + ' ok');
           return { km: res.routes[0].distance / 1000, mins: Math.round(res.routes[0].duration / 60) };
         }
-        tollTrace.push(lbl + ' ' + (res && res.code ? res.code : 'fail'));
         return null;
       })
-      .catch(function () { tollTrace.push(lbl + ' net-fail'); return null; });
+      .catch(function () { return null; });
   }
   function shiftPoint(from, toward, km) {
     var dist = haversineKm(from, toward);
@@ -502,9 +493,7 @@
     if (tollBusy) return;
     if (next.id === tollJobId && !moved) return;
     tollBusy = true;
-    tollTrace = [];
     var haveOrs = ORS_KEY && ORS_KEY.indexOf('PASTE') !== 0;
-    if (!haveOrs) tollTrace.push('no ORS key set');
     var pair = haveOrs
       ? Promise.all([orsRoute(p, next, false), orsRoute(p, next, true)])
       : Promise.all([fetchRoute(p, next, false), fetchRoute(p, next, true)]);
@@ -612,15 +601,6 @@
           }
           tollLine = '<div class="sub" style="margin-top:-8px;line-height:1.7">' + rows + '</div>';
         }
-      }
-      if (next._tollTraceShown === undefined) next._tollTraceShown = true;
-      if (tollTrace.length) {
-        tollLine += '<div class="sub" style="margin-top:-6px;font-size:10px;opacity:0.7">route check: ' +
-                    esc(tollTrace.join(' \u00b7 ')) + '</div>';
-      }
-      if (!next._tollRoute && tollTrace.length) {
-        tollLine = '<div class="sub" style="margin-top:-8px;font-size:10px;opacity:0.7">route check: ' +
-                   esc(tollTrace.join(' \u00b7 ')) + '</div>';
       }
       var routesDiffer = next._tollRoute && next._noTollRoute &&
           !(Math.abs(next._tollRoute.mins - next._noTollRoute.mins) < 1 &&
