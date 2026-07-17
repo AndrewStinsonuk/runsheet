@@ -547,3 +547,159 @@
         if (!n) {
           tollLine = '<div class="sub" style="margin-top:-8px">Toll-free comparison unavailable for this destination</div>';
         } else if (!n.approx && Math.abs(t.mins - n.mins) < 1 && Math.abs(t.km - n.km) < 0.3) {
+          tollLine = '<div class="sub" style="margin-top:-8px">No toll roads on this route</div>';
+        } else {
+          tollLine = '<div class="sub" style="margin-top:-8px"><span style="color:var(--amber)">Tolls:</span> ' +
+                     t.km.toFixed(1) + ' km \u00b7 ' + t.mins + ' min &nbsp;&nbsp;' +
+                     '<span style="color:var(--amber)">No tolls:</span> ' + (n.approx ? '\u2248' : '') +
+                     n.km.toFixed(1) + ' km \u00b7 ' + (n.approx ? '\u2248' : '') + n.mins + ' min</div>';
+        }
+      }
+      var routesDiffer = next._tollRoute && next._noTollRoute &&
+          !(Math.abs(next._tollRoute.mins - next._noTollRoute.mins) < 1 &&
+            Math.abs(next._tollRoute.km - next._noTollRoute.km) < 0.3);
+      var navBtns;
+      if (routesDiffer && next._noTollRoute.via) {
+        var v = next._noTollRoute.via;
+        var noTollUrl = 'https://www.google.com/maps/dir/?api=1&destination=' +
+                        next.lat + ',' + next.lon +
+                        '&waypoints=' + v.lat + ',' + v.lon + '&travelmode=driving';
+        navBtns = '<a class="btn btn-nav" href="' + navUrl(next) + '" target="runsheet_nav" rel="noopener">Tolls</a>' +
+                  '<a class="btn btn-nav" href="' + noTollUrl + '" target="runsheet_nav" rel="noopener">No&nbsp;Tolls</a>';
+      } else {
+        navBtns = '<a class="btn btn-nav" href="' + navUrl(next) + '" target="runsheet_nav" rel="noopener">Navigate</a>';
+      }
+      nw.innerHTML =
+        '<div class="next-card">' +
+          '<div class="eyebrow" style="display:flex;justify-content:space-between;align-items:center">' +
+            '<span>Next job' + (pinned ? ' \u00b7 your pick' : '') + '</span>' +
+            (pinned ? '<button onclick="unpinJob()" style="background:none;border:1px solid var(--line);border-radius:6px;color:var(--muted);font-size:11px;padding:4px 8px;cursor:pointer;letter-spacing:normal;text-transform:none;font-family:var(--body)">Back to nearest</button>' : '') +
+          '</div>' +
+          '<div class="addr">' + esc(next.label) + '</div>' +
+          (next.display ? '<div class="sub">' + esc(next.display) + '</div>' : '') +
+          '<div class="dist">' + d.n + '<small>' + d.u +
+            (next._mins != null ? ' \u00b7 ' + next._mins + ' min' : (posNow() ? ' away' : '')) + '</small></div>' +
+          tollLine +
+          '<div class="btn-row">' +
+            navBtns +
+            '<button class="btn btn-done" onclick="markDone(\'' + next.id + '\')">Delivered</button>' +
+          '</div>' +
+        '</div>';
+    } else {
+      nw.innerHTML = '';
+    }
+
+    // queue list
+    var ql = $('queueList');
+    ql.innerHTML = rest.map(function (j) {
+      var d = fmtDist(j._km);
+      var cls = 'job' + (j.lat == null && !j.error ? ' pending-geo' : '');
+      var sub = j.error ? 'Address not found' : (j.lat == null ? 'Looking up\u2026' : (j.display || ''));
+      var actions = j.error
+        ? '<button class="mini" onclick="retryJob(\'' + j.id + '\')">Retry</button>' +
+          '<button class="mini" onclick="removeJob(\'' + j.id + '\')">Remove</button>'
+        : '<button class="mini" style="color:var(--amber);border-color:var(--amber-dim)" onclick="pinJob(\'' + j.id + '\')">Next</button>' +
+          '<button class="mini" onclick="removeJob(\'' + j.id + '\')">\u2715</button>';
+      return '<div class="' + cls + '">' +
+        '<div class="info"><div class="addr">' + esc(j.label) + '</div>' +
+        '<div class="sub">' + esc(sub) + '</div></div>' +
+        '<div class="dist">' + d.n + '<small>' + d.u + '</small></div>' +
+        actions + '</div>';
+    }).join('');
+
+    $('queueLabel').style.display = rest.length ? 'flex' : 'none';
+    $('queueCount').textContent = rest.length + ' more';
+    $('emptyState').style.display = jobs.length ? 'none' : 'block';
+
+    // done list
+    var dl = $('doneList');
+    dl.innerHTML = done.map(function (j) {
+      return '<div class="job done">' +
+        '<div class="info"><div class="addr">' + esc(j.label) + '</div></div>' +
+        '<button class="mini" onclick="undoDone(\'' + j.id + '\')">Undo</button>' +
+        '<button class="mini" onclick="removeJob(\'' + j.id + '\')">\u2715</button></div>';
+    }).join('');
+    $('doneLabel').style.display = done.length ? 'flex' : 'none';
+    $('doneCount').textContent = done.length;
+
+    // refresh road distances if we've moved or the job list changed
+    setTimeout(maybeRouteUpdate, 0);
+    setTimeout(function () { maybeTollUpdate(next); }, 0);
+  }
+
+  // ---------- voice input (mic button, where the browser supports it) ----------
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var micBtn = $('micBtn');
+  if (SR && micBtn) {
+    micBtn.style.display = 'block';
+    var listening = false, rec = null;
+    micBtn.addEventListener('click', function () {
+      if (listening && rec) { rec.stop(); return; }
+      rec = new SR();
+      rec.lang = 'en-AU';
+      rec.interimResults = false;
+      rec.maxAlternatives = 1;
+      listening = true;
+      micBtn.style.color = 'var(--red)';
+      setStatus('Listening\u2026 say the address');
+      rec.onresult = function (e) {
+        var text = e.results[0][0].transcript;
+        if (text && text.trim()) addAddresses(text.trim());
+      };
+      rec.onerror = function () { setStatus('Didn\u2019t catch that \u2014 tap the mic and try again.', true); };
+      rec.onend = function () {
+        listening = false;
+        micBtn.style.color = 'var(--amber)';
+        if (statusMsg.textContent.indexOf('Listening') === 0) setStatus('');
+      };
+      rec.start();
+    });
+  }
+
+  // ---------- accept an address via the URL (?add=...) for Siri Shortcuts ----------
+  try {
+    var params = new URLSearchParams(location.search);
+    var incoming = params.get('add');
+    if (incoming && incoming.trim()) {
+      addAddresses(incoming.trim());
+      history.replaceState(null, '', location.pathname);
+    }
+  } catch (e) { /* older browsers: ignore */ }
+
+  // ---------- multi-tab handling: keep copies in sync, flag stale tabs ----------
+  function reloadFromStorage() {
+    try {
+      var fresh = JSON.parse(store.get('runsheet_jobs') || '[]');
+      jobs = fresh;
+      render();
+    } catch (e) { /* keep current state */ }
+  }
+  window.addEventListener('storage', function (e) {
+    if (e.key === 'runsheet_jobs') reloadFromStorage();
+  });
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) reloadFromStorage();
+  });
+  try {
+    var bc = new BroadcastChannel('runsheet');
+    bc.postMessage('new-instance');
+    bc.onmessage = function (e) {
+      if (e.data === 'new-instance') {
+        var banner = document.createElement('div');
+        banner.style.cssText = 'background:var(--red);color:#fff;text-align:center;' +
+          'padding:10px;border-radius:10px;margin-bottom:10px;font-size:13px;font-weight:600';
+        banner.textContent = 'RunSheet is open in a newer tab \u2014 close this one.';
+        document.body.insertBefore(banner, document.body.firstChild);
+      }
+    };
+  } catch (e) { /* BroadcastChannel unsupported: sync above still applies */ }
+
+  render();
+  var npb = document.getElementById('navPrefBtn');
+  if (npb) npb.textContent = 'Nav: ' + navApps[navPref].name;
+  // re-geocode anything that was saved mid-lookup
+  jobs.forEach(function (j) { if (j.lat == null && !j.error && j.status === 'queued') geocode(j); });
+})();
+</script>
+</body>
+</html>
