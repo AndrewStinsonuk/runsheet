@@ -108,7 +108,7 @@
   <button id="clearAllBtn">Clear all</button>
 </div>
 
-<p class="note">Searches are limited to Victoria and prefer the match closest to you. Distances are driving distance where available, recalculated as you move.<br>Geocoding: OpenStreetMap Nominatim &amp; Photon. Routing: Mapbox (live traffic), OSRM &amp; openrouteservice.<br>Build 801-beta</p>
+<p class="note">Searches are limited to Victoria and prefer the match closest to you. Distances are driving distance where available, recalculated as you move.<br>Geocoding: OpenStreetMap Nominatim &amp; Photon. Routing: Mapbox (live traffic), OSRM &amp; openrouteservice.<br>Build 802-beta</p>
 
 <script>
 (function () {
@@ -403,6 +403,7 @@
           routeOrigin = { lat: p.lat, lon: p.lon };
           routeSig = sig;
           routeLast = Date.now();
+          save();
           render();
         }
       })
@@ -599,6 +600,7 @@
           }
           tollJobId = next.id;
           tollOrigin = { lat: p.lat, lon: p.lon };
+          save(); // persist routes so a reloaded tab shows them instantly
           render();
         }
       })
