@@ -108,7 +108,7 @@
   <button id="clearAllBtn">Clear all</button>
 </div>
 
-<p class="note">Searches are limited to Victoria and prefer the match closest to you. Distances are driving distance where available, recalculated as you move.<br>Geocoding: OpenStreetMap Nominatim &amp; Photon. Routing: Mapbox (live traffic), OSRM &amp; openrouteservice.<br>Build 800-beta</p>
+<p class="note">Searches are limited to Victoria and prefer the match closest to you. Distances are driving distance where available, recalculated as you move.<br>Geocoding: OpenStreetMap Nominatim &amp; Photon. Routing: Mapbox (live traffic), OSRM &amp; openrouteservice.<br>Build 801-beta</p>
 
 <script>
 (function () {
@@ -791,6 +791,18 @@
   function reloadFromStorage() {
     try {
       var fresh = JSON.parse(store.get('runsheet_jobs') || '[]');
+      // Carry over live route/toll data (never saved to storage) by job id,
+      // so returning from another app doesn't blank the card.
+      fresh.forEach(function (nj) {
+        var old = jobs.find(function (o) { return o.id === nj.id; });
+        if (old) {
+          nj._tollRoute = old._tollRoute;
+          nj._noTollRoute = old._noTollRoute;
+          nj._altRoute = old._altRoute;
+          nj._roadKm = old._roadKm;
+          nj._mins = old._mins;
+        }
+      });
       jobs = fresh;
       render();
     } catch (e) { /* keep current state */ }
@@ -799,7 +811,11 @@
     if (e.key === 'runsheet_jobs') reloadFromStorage();
   });
   document.addEventListener('visibilitychange', function () {
-    if (!document.hidden) reloadFromStorage();
+    if (!document.hidden) {
+      // Traffic moved on while we were away - refetch live times for the next job
+      tollJobId = null;
+      reloadFromStorage();
+    }
   });
   try {
     var bc = new BroadcastChannel('runsheet');
