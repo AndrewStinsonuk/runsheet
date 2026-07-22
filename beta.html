@@ -76,6 +76,14 @@
   .footer-actions { margin-top: 20px; display: flex; gap: 8px; }
   .footer-actions button { flex: 1; background: none; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); font-size: 13px; padding: 12px; cursor: pointer; }
   .note { font-size: 11px; color: var(--muted); text-align: center; margin-top: 18px; line-height: 1.5; }
+
+  .suggest { background: var(--surface); border: 1px solid var(--amber); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; }
+  .suggest .sg-head { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .suggest .sg-head b { color: var(--text); }
+  .suggest button.sg-opt { display: flex; width: 100%; align-items: center; gap: 10px; text-align: left; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; color: var(--text); font-size: 14px; line-height: 1.35; padding: 12px; margin-bottom: 6px; cursor: pointer; }
+  .suggest button.sg-opt .sg-addr { flex: 1; overflow-wrap: anywhere; }
+  .suggest button.sg-opt .sg-km { font-family: var(--display); font-weight: 700; font-size: 14px; color: var(--muted); white-space: nowrap; }
+  .suggest button.sg-none { display: block; width: 100%; background: none; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); font-size: 13px; padding: 10px; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -92,6 +100,7 @@
 </div>
 <p class="hint">Tip: paste several addresses at once, one per line.</p>
 <p class="status-msg" id="statusMsg"></p>
+<div id="suggestBox" style="display:none"></div>
 
 <div id="nextWrap"></div>
 <div class="section-label" id="queueLabel" style="display:none">Then <span class="count" id="queueCount"></span></div>
@@ -108,7 +117,7 @@
   <button id="clearAllBtn">Clear all</button>
 </div>
 
-<p class="note">Searches are limited to Victoria and prefer the match closest to you. Distances are driving distance where available, recalculated as you move.<br>Geocoding: OpenStreetMap Nominatim &amp; Photon. Routing: Mapbox (live traffic), OSRM &amp; openrouteservice.<br>Build 803-beta</p>
+<p class="note">Searches are limited to Victoria and prefer the match closest to you. Distances are driving distance where available, recalculated as you move.<br>Geocoding: Mapbox, OpenStreetMap Nominatim &amp; Photon. Routing: Mapbox (live traffic), OSRM &amp; openrouteservice.<br>Build 804-beta</p>
 
 <script>
 (function () {
@@ -247,6 +256,8 @@
   function addAddresses(text) {
     var lines = text.split(/\n+/).map(function (s) { return s.trim(); }).filter(Boolean);
     if (!lines.length) return;
+    if (lines.length === 1) { input.value = ''; suggestFor(lines[0]); return; }
+    // Batch paste: auto-geocode as before (a picker per line would be a chore)
     lines.forEach(function (line) {
       var job = { id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
                   label: line, lat: null, lon: null, display: null, status: 'queued', error: false };
@@ -255,7 +266,131 @@
     });
     save(); render();
     input.value = '';
-    setStatus(lines.length > 1 ? 'Looking up ' + lines.length + ' addresses\u2026' : 'Looking up address\u2026');
+    setStatus('Looking up ' + lines.length + ' addresses\u2026');
+  }
+
+  // ---------- single-add suggestion picker (voice & typed entries) ----------
+  var suggestBox = $('suggestBox');
+  function clearSuggest() { suggestBox.style.display = 'none'; suggestBox.innerHTML = ''; }
+
+  function mapboxSuggest(q) {
+    if (!MAPBOX_TOKEN || MAPBOX_TOKEN.indexOf('PASTE') === 0) return Promise.resolve([]);
+    var url = 'https://api.mapbox.com/geocoding/v5/mapbox.places/' + encodeURIComponent(q) + '.json' +
+              '?access_token=' + encodeURIComponent(MAPBOX_TOKEN) +
+              '&country=au&limit=3&language=en-AU&bbox=140.95,-39.25,150.05,-33.95' +
+              '&types=address,poi,place,locality,neighborhood';
+    var p = posNow();
+    if (p) url += '&proximity=' + p.lon + ',' + p.lat;
+    return fetch(url)
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        var feats = (res && res.features) ? res.features : [];
+        return feats.map(function (f) {
+          return { lat: f.center[1], lon: f.center[0], display: f.place_name };
+        }).filter(function (c) { return inVic(c.lat, c.lon); });
+      })
+      .catch(function () { return []; });
+  }
+  function nominatimSuggest(q) {
+    var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=au' +
+              '&viewbox=140.95,-33.95,150.05,-39.25&bounded=1&q=' + encodeURIComponent(q);
+    return fetch(url, { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        var cands = (res || []).map(function (c) {
+          return { lat: parseFloat(c.lat), lon: parseFloat(c.lon), display: c.display_name };
+        }).filter(function (c) { return inVic(c.lat, c.lon); });
+        var p = posNow();
+        if (p && cands.length > 1) cands.sort(function (a, b) { return haversineKm(p, a) - haversineKm(p, b); });
+        return cands.slice(0, 3);
+      })
+      .catch(function () { return []; });
+  }
+  function photonSuggest(q) {
+    var url = 'https://photon.komoot.io/api/?limit=5&bbox=140.95,-39.25,150.05,-33.95&q=' + encodeURIComponent(q);
+    var p = posNow();
+    if (p) url += '&lat=' + p.lat + '&lon=' + p.lon;
+    return fetch(url, { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        var feats = (res && res.features) ? res.features.filter(function (f) {
+          return f.properties && f.properties.countrycode === 'AU' &&
+                 f.geometry && inVic(f.geometry.coordinates[1], f.geometry.coordinates[0]);
+        }) : [];
+        return feats.slice(0, 3).map(function (f) {
+          var pr = f.properties;
+          var parts = [pr.name, pr.street && (pr.housenumber ? pr.housenumber + ' ' + pr.street : pr.street),
+                       pr.district, pr.city, pr.state, pr.postcode].filter(Boolean);
+          return { lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], display: parts.join(', ') };
+        });
+      })
+      .catch(function () { return []; });
+  }
+  function fetchSuggestions(q) {
+    return mapboxSuggest(q).then(function (list) {
+      if (list.length) return list;
+      return nominatimSuggest(q).then(function (list2) {
+        if (list2.length) return list2;
+        return photonSuggest(q);
+      });
+    });
+  }
+  function suggestFor(q) {
+    clearSuggest();
+    setStatus('Finding matches for \u201C' + q + '\u201D\u2026');
+    fetchSuggestions(q)
+      .then(function (list) {
+        if (!list.length) {
+          input.value = q;
+          setStatus('Couldn\u2019t find \u201C' + q + '\u201D in Victoria \u2014 edit it and try again (add a suburb).', true);
+          return;
+        }
+        setStatus('');
+        renderSuggest(q, list.slice(0, 3));
+      })
+      .catch(function () {
+        input.value = q;
+        setStatus('Network problem looking up \u201C' + q + '\u201D \u2014 tap Add to retry.', true);
+      });
+  }
+  function renderSuggest(q, list) {
+    suggestBox.innerHTML = '';
+    var head = document.createElement('div');
+    head.className = 'sg-head';
+    head.appendChild(document.createTextNode('Heard \u201C'));
+    var b = document.createElement('b'); b.textContent = q; head.appendChild(b);
+    head.appendChild(document.createTextNode('\u201D \u2014 tap the right one:'));
+    suggestBox.appendChild(head);
+    var p = posNow();
+    list.forEach(function (c) {
+      var btn = document.createElement('button');
+      btn.className = 'sg-opt';
+      var addr = document.createElement('span'); addr.className = 'sg-addr'; addr.textContent = c.display;
+      btn.appendChild(addr);
+      if (p) {
+        var d = fmtDist(haversineKm(p, c));
+        var km = document.createElement('span'); km.className = 'sg-km'; km.textContent = d.n + ' ' + d.u;
+        btn.appendChild(km);
+      }
+      btn.addEventListener('click', function () {
+        var job = { id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+                    label: q, lat: c.lat, lon: c.lon, display: c.display, status: 'queued', error: false };
+        jobs.push(job);
+        clearSuggest();
+        save(); render();
+      });
+      suggestBox.appendChild(btn);
+    });
+    var none = document.createElement('button');
+    none.className = 'sg-none';
+    none.textContent = 'None of these \u2014 edit and try again';
+    none.addEventListener('click', function () {
+      clearSuggest();
+      input.value = q;
+      input.focus();
+    });
+    suggestBox.appendChild(none);
+    suggestBox.style.display = 'block';
   }
   addBtn.addEventListener('click', function () { addAddresses(input.value); });
   input.addEventListener('keydown', function (e) { if (e.key === 'Enter') addAddresses(input.value); });
