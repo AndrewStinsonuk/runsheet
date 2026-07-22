@@ -117,7 +117,7 @@
   <button id="clearAllBtn">Clear all</button>
 </div>
 
-<p class="note">Searches are limited to Victoria and prefer the match closest to you. Distances are driving distance where available, recalculated as you move.<br>Geocoding: Mapbox, OpenStreetMap Nominatim &amp; Photon. Routing: Mapbox (live traffic), OSRM &amp; openrouteservice.<br>Build 804-beta</p>
+<p class="note">Searches are limited to Victoria and prefer the match closest to you. Distances are driving distance where available, recalculated as you move.<br>Geocoding: Mapbox, OpenStreetMap Nominatim &amp; Photon. Routing: Mapbox (live traffic), OSRM &amp; openrouteservice.<br>Build 805-beta</p>
 
 <script>
 (function () {
@@ -277,7 +277,7 @@
     if (!MAPBOX_TOKEN || MAPBOX_TOKEN.indexOf('PASTE') === 0) return Promise.resolve([]);
     var url = 'https://api.mapbox.com/geocoding/v5/mapbox.places/' + encodeURIComponent(q) + '.json' +
               '?access_token=' + encodeURIComponent(MAPBOX_TOKEN) +
-              '&country=au&limit=3&language=en-AU&bbox=140.95,-39.25,150.05,-33.95' +
+              '&country=au&limit=5&language=en-AU&bbox=140.95,-39.25,150.05,-33.95' +
               '&types=address,poi,place,locality,neighborhood';
     var p = posNow();
     if (p) url += '&proximity=' + p.lon + ',' + p.lat;
@@ -327,11 +327,24 @@
       .catch(function () { return []; });
   }
   function fetchSuggestions(q) {
+    // Merge sources until we have up to 3 distinct options - Mapbox alone
+    // often returns a single confident hit, which defeats the picker.
+    function sameSpot(a, b) { return haversineKm(a, b) < 0.15; }
+    function mergeIn(list, extra) {
+      extra.forEach(function (c) {
+        if (list.length >= 3) return;
+        var dup = list.some(function (e) { return sameSpot(e, c); });
+        if (!dup) list.push(c);
+      });
+      return list;
+    }
     return mapboxSuggest(q).then(function (list) {
-      if (list.length) return list;
-      return nominatimSuggest(q).then(function (list2) {
-        if (list2.length) return list2;
-        return photonSuggest(q);
+      list = list.slice(0, 3);
+      if (list.length >= 3) return list;
+      return nominatimSuggest(q).then(function (nom) {
+        list = mergeIn(list, nom);
+        if (list.length >= 3) return list;
+        return photonSuggest(q).then(function (pho) { return mergeIn(list, pho); });
       });
     });
   }
