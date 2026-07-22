@@ -84,13 +84,23 @@
   .suggest button.sg-opt .sg-addr { flex: 1; overflow-wrap: anywhere; }
   .suggest button.sg-opt .sg-km { font-family: var(--display); font-weight: 700; font-size: 14px; color: var(--muted); white-space: nowrap; }
   .suggest button.sg-none { display: block; width: 100%; background: none; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); font-size: 13px; padding: 10px; cursor: pointer; }
+
+  .map-panel { display: none; height: 55vh; min-height: 300px; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 12px; overflow: hidden; background: var(--surface); }
+  .map-panel .map-msg { color: var(--muted); font-size: 13px; text-align: center; padding: 34px 16px; }
+  .job-pin { width: 27px; height: 27px; border-radius: 50%; background: var(--amber); color: #241a00; font-family: var(--display); font-weight: 700; font-size: 14px; display: flex; align-items: center; justify-content: center; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.45); cursor: pointer; }
+  .job-pin.next { background: var(--green); color: #06240f; }
+  .job-pin.done { background: var(--surface-2); color: var(--muted); border-color: var(--line); opacity: 0.8; }
+  .me-pin { width: 16px; height: 16px; border-radius: 50%; background: #1e88ff; border: 3px solid #fff; box-shadow: 0 0 0 3px rgba(30,136,255,0.35); }
 </style>
 </head>
 <body>
 
 <header>
   <h1>Run<span>Sheet</span> <span style="font-size:13px;vertical-align:super">BETA</span></h1>
-  <div class="gps"><div class="gps-dot" id="gpsDot"></div><span id="gpsText">GPS off</span></div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <button id="mapBtn" style="background:var(--surface-2);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:5px 12px;font-size:17px;cursor:pointer;line-height:1" title="Run overview map">&#128506;</button>
+    <div class="gps"><div class="gps-dot" id="gpsDot"></div><span id="gpsText">GPS off</span></div>
+  </div>
 </header>
 
 <div class="add-row">
@@ -101,6 +111,7 @@
 <p class="hint">Tip: paste several addresses at once, one per line.</p>
 <p class="status-msg" id="statusMsg"></p>
 <div id="suggestBox" style="display:none"></div>
+<div id="mapPanel" class="map-panel"></div>
 
 <div id="nextWrap"></div>
 <div class="section-label" id="queueLabel" style="display:none">Then <span class="count" id="queueCount"></span></div>
@@ -117,7 +128,7 @@
   <button id="clearAllBtn">Clear all</button>
 </div>
 
-<p class="note">Searches are limited to Victoria and prefer the match closest to you. Distances are driving distance where available, recalculated as you move.<br>Geocoding: Mapbox, OpenStreetMap Nominatim &amp; Photon. Routing: Mapbox (live traffic), OSRM &amp; openrouteservice.<br>Build 805-beta</p>
+<p class="note">Searches are limited to Victoria and prefer the match closest to you. Distances are driving distance where available, recalculated as you move.<br>Geocoding: Mapbox, OpenStreetMap Nominatim &amp; Photon. Routing: Mapbox (live traffic), OSRM &amp; openrouteservice.<br>Build 806-beta</p>
 
 <script>
 (function () {
@@ -404,6 +415,99 @@
     });
     suggestBox.appendChild(none);
     suggestBox.style.display = 'block';
+  }
+
+  // ---------- run overview map (lazy-loaded Mapbox GL) ----------
+  var mapBtn = $('mapBtn'), mapPanel = $('mapPanel');
+  var mbMap = null, mbMarkers = [], mbLibLoading = false;
+  function mapVisible() { return mapPanel.style.display === 'block'; }
+  mapBtn.addEventListener('click', function () {
+    if (mapVisible()) { mapPanel.style.display = 'none'; return; }
+    mapPanel.style.display = 'block';
+    ensureMap();
+  });
+  function ensureMap() {
+    if (mbMap) {
+      setTimeout(function () { mbMap.resize(); refreshMapMarkers(true); }, 50);
+      return;
+    }
+    if (mbLibLoading) return;
+    if (!MAPBOX_TOKEN || MAPBOX_TOKEN.indexOf('PASTE') === 0) {
+      mapPanel.innerHTML = '<div class="map-msg">Map needs the Mapbox token.</div>';
+      return;
+    }
+    mbLibLoading = true;
+    mapPanel.innerHTML = '<div class="map-msg">Loading map\u2026</div>';
+    var css = document.createElement('link');
+    css.rel = 'stylesheet';
+    css.href = 'https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.css';
+    document.head.appendChild(css);
+    var s = document.createElement('script');
+    s.src = 'https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.js';
+    s.onload = function () {
+      mapPanel.innerHTML = '';
+      mapboxgl.accessToken = MAPBOX_TOKEN;
+      mbMap = new mapboxgl.Map({
+        container: mapPanel,
+        style: 'mapbox://styles/mapbox/streets-v12',
+        center: [144.9631, -37.8136], zoom: 9
+      });
+      mbMap.addControl(new mapboxgl.NavigationControl({ showCompass: false }));
+      mbMap.on('load', function () { refreshMapMarkers(true); });
+    };
+    s.onerror = function () {
+      mbLibLoading = false;
+      mapPanel.innerHTML = '<div class="map-msg">Couldn\u2019t load the map \u2014 check signal, close and tap the map button again.</div>';
+    };
+    document.head.appendChild(s);
+  }
+  function refreshMapMarkers(fit) {
+    if (!mbMap || !window.mapboxgl) return;
+    mbMarkers.forEach(function (m) { m.remove(); });
+    mbMarkers = [];
+    var pts = [];
+    function addPin(el, lon, lat, popupText) {
+      var mk = new mapboxgl.Marker({ element: el }).setLngLat([lon, lat]);
+      if (popupText) mk.setPopup(new mapboxgl.Popup({ offset: 18, closeButton: false }).setText(popupText));
+      mk.addTo(mbMap);
+      mbMarkers.push(mk);
+      pts.push([lon, lat]);
+    }
+    // number queued pins in the same order as the on-screen run (next = 1)
+    var queued = jobs.filter(function (j) { return j.status === 'queued' && j.lat != null; });
+    queued.sort(function (a, b) {
+      if ((a._km == null) !== (b._km == null)) return a._km == null ? 1 : -1;
+      return (a._km || 0) - (b._km || 0);
+    });
+    var pinnedJob = queued.find(function (j) { return j.pinned; });
+    if (pinnedJob) queued = [pinnedJob].concat(queued.filter(function (j) { return j.id !== pinnedJob.id; }));
+    queued.forEach(function (j, i) {
+      var el = document.createElement('div');
+      el.className = 'job-pin' + (i === 0 ? ' next' : '');
+      el.textContent = (i + 1);
+      addPin(el, j.lon, j.lat, j.display || j.label);
+    });
+    jobs.filter(function (j) { return j.status === 'done' && j.lat != null; }).forEach(function (j) {
+      var el = document.createElement('div');
+      el.className = 'job-pin done';
+      el.textContent = '\u2713';
+      addPin(el, j.lon, j.lat, 'Delivered \u00b7 ' + (j.display || j.label));
+    });
+    var p = posNow();
+    if (p) {
+      var me = document.createElement('div');
+      me.className = 'me-pin';
+      addPin(me, p.lon, p.lat, null);
+    }
+    if (fit && pts.length) {
+      if (pts.length === 1) {
+        mbMap.jumpTo({ center: pts[0], zoom: 13 });
+      } else {
+        var b = new mapboxgl.LngLatBounds(pts[0], pts[0]);
+        pts.forEach(function (c) { b.extend(c); });
+        mbMap.fitBounds(b, { padding: 48, maxZoom: 14, duration: 0 });
+      }
+    }
   }
   addBtn.addEventListener('click', function () { addAddresses(input.value); });
   input.addEventListener('keydown', function (e) { if (e.key === 'Enter') addAddresses(input.value); });
@@ -902,6 +1006,7 @@
     // refresh road distances if we've moved or the job list changed
     setTimeout(maybeRouteUpdate, 0);
     setTimeout(function () { maybeTollUpdate(next); }, 0);
+    if (mbMap && mapVisible()) refreshMapMarkers(false);
   }
 
   // ---------- voice input (mic button, where the browser supports it) ----------
