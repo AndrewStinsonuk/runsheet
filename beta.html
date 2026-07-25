@@ -109,6 +109,10 @@
   .fuel-toggle.on { border-color: var(--amber); box-shadow: 0 0 0 2px var(--amber-dim), 0 2px 8px rgba(0,0,0,0.4); }
   .fuel-pin { width: 22px; height: 22px; border-radius: 50%; background: #20262e; font-size: 12px; display: flex; align-items: center; justify-content: center; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.45); cursor: pointer; }
   .fuel-status { position: absolute; left: 10px; bottom: 26px; z-index: 5; background: var(--surface); color: var(--muted); border: 1px solid var(--line); border-radius: 8px; font-size: 11px; padding: 5px 9px; max-width: 60%; }
+  .wc-toggle { position: absolute; right: 10px; bottom: 130px; z-index: 5; width: 44px; height: 44px; border-radius: 50%; background: var(--surface); border: 1px solid var(--line); font-size: 18px; line-height: 1; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+  .wc-toggle.on { border-color: var(--amber); box-shadow: 0 0 0 2px var(--amber-dim), 0 2px 8px rgba(0,0,0,0.4); }
+  .wc-pin { width: 22px; height: 22px; border-radius: 50%; background: #1c4b6e; font-size: 11px; display: flex; align-items: center; justify-content: center; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.45); cursor: pointer; }
+  .wc-status { position: absolute; left: 10px; bottom: 58px; z-index: 5; background: var(--surface); color: var(--muted); border: 1px solid var(--line); border-radius: 8px; font-size: 11px; padding: 5px 9px; max-width: 60%; }
 </style>
 </head>
 <body>
@@ -148,7 +152,7 @@
   <button id="clearAllBtn">Clear all</button>
 </div>
 
-<p class="note">Searches are limited to Victoria and prefer the match closest to you. Distances are driving distance where available, recalculated as you move.<br>Geocoding: Mapbox, OpenStreetMap Nominatim &amp; Photon. Routing: Mapbox (live traffic), OSRM &amp; openrouteservice.<br>Build 815-beta</p>
+<p class="note">Searches are limited to Victoria and prefer the match closest to you. Distances are driving distance where available, recalculated as you move.<br>Geocoding: Mapbox, OpenStreetMap Nominatim &amp; Photon. Routing: Mapbox (live traffic), OSRM &amp; openrouteservice.<br>Build 816-beta</p>
 
 <script>
 (function () {
@@ -453,6 +457,8 @@
   }
   var fuelOn = store.get('runsheet_fuel') === '1';
   var fuelCache = null, fuelLoading = false, fuelToggleEl = null, fuelStatusEl = null;
+  var wcOn = store.get('runsheet_wc') === '1';
+  var wcCache = null, wcLoading = false, wcToggleEl = null, wcStatusEl = null;
   function mapVisible() { return mapPanel.style.display === 'block'; }
   mapBtn.addEventListener('click', function () {
     if (mapVisible()) { mapPanel.style.display = 'none'; return; }
@@ -524,9 +530,25 @@
       fuelStatusEl.className = 'fuel-status';
       fuelStatusEl.style.display = 'none';
       mapPanel.appendChild(fuelStatusEl);
+      wcToggleEl = document.createElement('button');
+      wcToggleEl.className = 'wc-toggle' + (wcOn ? ' on' : '');
+      wcToggleEl.title = 'Show public toilets';
+      wcToggleEl.textContent = '\ud83d\udebb';
+      wcToggleEl.addEventListener('click', function () {
+        wcOn = !wcOn;
+        store.set('runsheet_wc', wcOn ? '1' : '0');
+        wcToggleEl.className = 'wc-toggle' + (wcOn ? ' on' : '');
+        if (wcOn) { ensureWcData(); } else { setWcStatus(null); refreshMapMarkers(false); }
+      });
+      mapPanel.appendChild(wcToggleEl);
+      wcStatusEl = document.createElement('div');
+      wcStatusEl.className = 'wc-status';
+      wcStatusEl.style.display = 'none';
+      mapPanel.appendChild(wcStatusEl);
       mbMap.on('load', function () {
         refreshMapMarkers(true);
         if (fuelOn) ensureFuelData();
+        if (wcOn) ensureWcData();
       });
     };
     s.onerror = function () {
@@ -598,6 +620,68 @@
       })
       .finally(function () { fuelLoading = false; });
   }
+  function setWcStatus(txt) {
+    if (!wcStatusEl) return;
+    if (!txt) { wcStatusEl.style.display = 'none'; return; }
+    wcStatusEl.textContent = txt;
+    wcStatusEl.style.display = 'block';
+  }
+  function ensureWcData() {
+    if (wcLoading) return;
+    var located = jobs.filter(function (j) { return j.lat != null; });
+    var p = posNow();
+    if (!located.length && !p) { setWcStatus('Add a job first \u2014 toilets show along the run'); return; }
+    var lats = located.map(function (j) { return j.lat; }), lons = located.map(function (j) { return j.lon; });
+    if (p) { lats.push(p.lat); lons.push(p.lon); }
+    var sBox = Math.min.apply(null, lats) - 0.03, nBox = Math.max.apply(null, lats) + 0.03;
+    var wBox = Math.min.apply(null, lons) - 0.03, eBox = Math.max.apply(null, lons) + 0.03;
+    var cLat = (sBox + nBox) / 2, cLon = (wBox + eBox) / 2;
+    if (wcCache && Date.now() - wcCache.ts < 30 * 60000 &&
+        haversineKm({ lat: cLat, lon: cLon }, { lat: wcCache.cLat, lon: wcCache.cLon }) < 2) {
+      refreshMapMarkers(false);
+      setWcStatus(wcCache.list.length + ' toilets shown');
+      return;
+    }
+    wcLoading = true;
+    setWcStatus('Finding toilets\u2026');
+    var q = '[out:json][timeout:12];(node["amenity"="toilets"](' + sBox + ',' + wBox + ',' + nBox + ',' + eBox + ');' +
+            'way["amenity"="toilets"](' + sBox + ',' + wBox + ',' + nBox + ',' + eBox + '););out center 120;';
+    fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'data=' + encodeURIComponent(q)
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        var list = (res && res.elements ? res.elements : []).map(function (el) {
+          var lat = el.lat != null ? el.lat : (el.center && el.center.lat);
+          var lon = el.lon != null ? el.lon : (el.center && el.center.lon);
+          if (lat == null || lon == null) return null;
+          var tg = el.tags || {};
+          if (tg.access === 'private' || tg.access === 'no') return null;
+          var nm = tg.name || 'Public toilet';
+          if (tg.fee === 'yes') nm += ' (fee)';
+          return { lat: lat, lon: lon, name: nm };
+        }).filter(Boolean);
+        var anchors = jobs.filter(function (j) { return j.lat != null; }).slice();
+        var p2 = posNow();
+        if (p2) anchors.push(p2);
+        if (anchors.length && list.length > 40) {
+          list.forEach(function (st) {
+            st._d = Math.min.apply(null, anchors.map(function (a) { return haversineKm(a, st); }));
+          });
+          list.sort(function (a, b) { return a._d - b._d; });
+          list = list.slice(0, 40);
+        }
+        wcCache = { list: list, ts: Date.now(), cLat: cLat, cLon: cLon };
+        refreshMapMarkers(false);
+        setWcStatus(list.length ? list.length + ' toilets shown' : 'No public toilets mapped in this area');
+      })
+      .catch(function () {
+        setWcStatus('Toilets unavailable \u2014 tap \ud83d\udebb twice to retry');
+      })
+      .finally(function () { wcLoading = false; });
+  }
   function refreshMapMarkers(fit) {
     if (!mbMap || !window.mapboxgl) return;
     mbMarkers.forEach(function (m) { m.remove(); });
@@ -630,6 +714,17 @@
       el.textContent = '\u2713';
       addPin(el, j.lon, j.lat, 'Delivered \u00b7 ' + (j.display || j.label));
     });
+    if (wcOn && wcCache && wcCache.list.length) {
+      wcCache.list.forEach(function (st) {
+        var wel = document.createElement('div');
+        wel.className = 'wc-pin';
+        wel.textContent = '\ud83d\udebb';
+        var wmk = new mapboxgl.Marker({ element: wel }).setLngLat([st.lon, st.lat]);
+        wmk.setPopup(new mapboxgl.Popup({ offset: 16, closeButton: false }).setText(st.name));
+        wmk.addTo(mbMap);
+        mbMarkers.push(wmk);
+      });
+    }
     if (fuelOn && fuelCache && fuelCache.list.length) {
       fuelCache.list.forEach(function (st) {
         var fel = document.createElement('div');
