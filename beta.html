@@ -89,6 +89,7 @@
   .map-panel .map-msg { color: var(--muted); font-size: 13px; text-align: center; padding: 34px 16px; }
   .me-arrow svg { display: block; filter: drop-shadow(0 1px 3px rgba(0,0,0,0.5)); }
   .me-recenter { position: absolute; right: 10px; bottom: 26px; z-index: 5; width: 44px; height: 44px; border-radius: 50%; background: var(--surface); color: #1e88ff; border: 1px solid var(--line); font-size: 24px; line-height: 1; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+  .me-recenter.follow { border-color: var(--amber); color: var(--amber); box-shadow: 0 0 0 2px var(--amber-dim), 0 2px 8px rgba(0,0,0,0.4); }
   .mapboxgl-popup-content { color: #000 !important; font-size: 13px; font-weight: 600; line-height: 1.4; }
   .job-pin { width: 27px; height: 27px; border-radius: 50%; background: var(--amber); color: #241a00; font-family: var(--display); font-weight: 700; font-size: 14px; display: flex; align-items: center; justify-content: center; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.45); cursor: pointer; }
   .job-pin.next { background: var(--green); color: #06240f; }
@@ -135,7 +136,7 @@
   <button id="clearAllBtn">Clear all</button>
 </div>
 
-<p class="note">Searches are limited to Victoria and prefer the match closest to you. Distances are driving distance where available, recalculated as you move.<br>Geocoding: Mapbox, OpenStreetMap Nominatim &amp; Photon. Routing: Mapbox (live traffic), OSRM &amp; openrouteservice.<br>Build 809-beta</p>
+<p class="note">Searches are limited to Victoria and prefer the match closest to you. Distances are driving distance where available, recalculated as you move.<br>Geocoding: Mapbox, OpenStreetMap Nominatim &amp; Photon. Routing: Mapbox (live traffic), OSRM &amp; openrouteservice.<br>Build 810-beta</p>
 
 <script>
 (function () {
@@ -427,6 +428,17 @@
   // ---------- run overview map (lazy-loaded Mapbox GL) ----------
   var mapBtn = $('mapBtn'), mapPanel = $('mapPanel');
   var mbMap = null, mbMarkers = [], mbLibLoading = false;
+  var mapFollow = false, followBtnEl = null;
+  function engageFollow() {
+    var p = posNow();
+    if (!mbMap || !p) return;
+    mbMap.easeTo({
+      center: [p.lon, p.lat],
+      zoom: Math.max(mbMap.getZoom ? mbMap.getZoom() : 14, 14),
+      bearing: (lastHeading != null ? lastHeading : (mbMap.getBearing ? mbMap.getBearing() : 0)),
+      duration: 600
+    });
+  }
   var fuelOn = store.get('runsheet_fuel') === '1';
   var fuelCache = null, fuelLoading = false, fuelToggleEl = null, fuelStatusEl = null;
   function mapVisible() { return mapPanel.style.display === 'block'; }
@@ -437,7 +449,7 @@
   });
   function ensureMap() {
     if (mbMap) {
-      setTimeout(function () { mbMap.resize(); refreshMapMarkers(true); }, 50);
+      setTimeout(function () { mbMap.resize(); refreshMapMarkers(true); if (mapFollow) engageFollow(); }, 50);
       return;
     }
     if (mbLibLoading) return;
@@ -464,11 +476,25 @@
       mbMap.addControl(new mapboxgl.NavigationControl({ showCompass: false }));
       var rc = document.createElement('button');
       rc.className = 'me-recenter';
-      rc.title = 'Centre on me';
+      rc.title = 'Follow me \u2014 map turns so you drive up the screen';
       rc.textContent = '\u2316';
+      followBtnEl = rc;
       rc.addEventListener('click', function () {
-        var p = posNow();
-        if (p) mbMap.flyTo({ center: [p.lon, p.lat], zoom: 14, duration: 600 });
+        mapFollow = !mapFollow;
+        rc.className = 'me-recenter' + (mapFollow ? ' follow' : '');
+        if (mapFollow) {
+          engageFollow();
+        } else {
+          // back to overview: north-up, leave position where it is
+          mbMap.easeTo({ bearing: 0, duration: 500 });
+        }
+      });
+      mbMap.on('dragstart', function () {
+        // manual pan pauses following, nav-app style; tap \u2316 to re-engage
+        if (mapFollow) {
+          mapFollow = false;
+          if (followBtnEl) followBtnEl.className = 'me-recenter';
+        }
       });
       mapPanel.appendChild(rc);
       fuelToggleEl = document.createElement('button');
@@ -622,7 +648,7 @@
         addPin(me, p.lon, p.lat, null);
       }
     }
-    if (fit && pts.length) {
+    if (fit && !mapFollow && pts.length) {
       if (pts.length === 1) {
         mbMap.jumpTo({ center: pts[0], zoom: 13 });
       } else {
@@ -1132,7 +1158,10 @@
     // refresh road distances if we've moved or the job list changed
     setTimeout(maybeRouteUpdate, 0);
     setTimeout(function () { maybeTollUpdate(next); }, 0);
-    if (mbMap && mapVisible()) refreshMapMarkers(false);
+    if (mbMap && mapVisible()) {
+      refreshMapMarkers(false);
+      if (mapFollow) engageFollow();
+    }
   }
 
   // ---------- voice input (mic button, where the browser supports it) ----------
