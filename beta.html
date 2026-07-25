@@ -152,7 +152,7 @@
   <button id="clearAllBtn">Clear all</button>
 </div>
 
-<p class="note">Searches are limited to Victoria and prefer the match closest to you. Distances are driving distance where available, recalculated as you move.<br>Geocoding: Mapbox, OpenStreetMap Nominatim &amp; Photon. Routing: Mapbox (live traffic), OSRM &amp; openrouteservice.<br>Build 816-beta</p>
+<p class="note">Searches are limited to Victoria and prefer the match closest to you. Distances are driving distance where available, recalculated as you move.<br>Geocoding: Mapbox, OpenStreetMap Nominatim &amp; Photon. Routing: Mapbox (live traffic), OSRM &amp; openrouteservice.<br>Build 817-beta</p>
 
 <script>
 (function () {
@@ -917,7 +917,7 @@
         (x.f.display ? '<div class="sb">' + esc(x.f.display) + '</div>' : '') + '</div>' +
         (favInRun(x.f.label)
           ? '<button class="mini" style="background:var(--green);color:#06240f;border-color:var(--green);font-weight:700" onclick="addFromFav(' + x.i + ')">\u2713 In run</button>'
-          : '<button class="mini" style="color:var(--amber);border-color:var(--amber-dim)" onclick="addFromFav(' + x.i + ')">Add</button>') +
+          : '<button class="mini" style="background:#1E90FF;color:#000;border-color:#1E90FF;font-weight:700" onclick="addFromFav(' + x.i + ')">Add</button>') +
         '</div></div>';
     }).join('');
   }
