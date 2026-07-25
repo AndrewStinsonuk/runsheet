@@ -146,7 +146,7 @@
   <button id="clearAllBtn">Clear all</button>
 </div>
 
-<p class="note">Searches are limited to Victoria and prefer the match closest to you. Distances are driving distance where available, recalculated as you move.<br>Geocoding: Mapbox, OpenStreetMap Nominatim &amp; Photon. Routing: Mapbox (live traffic), OSRM &amp; openrouteservice.<br>Build 813-beta</p>
+<p class="note">Searches are limited to Victoria and prefer the match closest to you. Distances are driving distance where available, recalculated as you move.<br>Geocoding: Mapbox, OpenStreetMap Nominatim &amp; Photon. Routing: Mapbox (live traffic), OSRM &amp; openrouteservice.<br>Build 814-beta</p>
 
 <script>
 (function () {
@@ -773,9 +773,16 @@
     else { favs.push({ label: j.label, lat: j.lat, lon: j.lon, display: j.display || '' }); }
     saveFavs(); renderFavPanel(); render();
   };
+  function favInRun(label) {
+    var key = String(label || '').trim().toLowerCase();
+    return jobs.some(function (j) {
+      return j.status === 'queued' && String(j.label || '').trim().toLowerCase() === key;
+    });
+  }
   window.addFromFav = function (i) {
     var f = favs[i];
     if (!f) return;
+    if (favInRun(f.label) && !confirm('"' + f.label + '" is already in your run \u2014 add it again?')) return;
     jobs.push({ id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
                 label: f.label, lat: f.lat, lon: f.lon, display: f.display || '',
                 status: 'queued', error: false });
@@ -804,7 +811,9 @@
       return '<div class="fav-row">' +
         '<div style="flex:1;min-width:0"><div class="nm">' + esc(x.f.label) + '</div>' +
         (x.f.display ? '<div class="sb">' + esc(x.f.display) + '</div>' : '') + '</div>' +
-        '<button class="mini" style="color:var(--amber);border-color:var(--amber-dim)" onclick="addFromFav(' + x.i + ')">Add</button>' +
+        (favInRun(x.f.label)
+          ? '<button class="mini" style="background:var(--green);color:#06240f;border-color:var(--green);font-weight:700" onclick="addFromFav(' + x.i + ')">\u2713 In run</button>'
+          : '<button class="mini" style="color:var(--amber);border-color:var(--amber-dim)" onclick="addFromFav(' + x.i + ')">Add</button>') +
         '<button class="mini" onclick="delFav(' + x.i + ')">\u2715</button>' +
         '</div>';
     }).join('');
@@ -1225,6 +1234,7 @@
     }).join('');
     $('doneLabel').style.display = done.length ? 'flex' : 'none';
     $('doneCount').textContent = done.length;
+    renderFavPanel();
 
     // refresh road distances if we've moved or the job list changed
     setTimeout(maybeRouteUpdate, 0);
